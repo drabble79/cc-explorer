@@ -1162,7 +1162,9 @@ async function openSession(file){
     ` · ${data.events.length}개 메시지${m.badLines?(" · 깨진줄 "+m.badLines):""}</span></div>`+
     summaryCard(data)+
     `<div id="filterFloat">${filterControlHTML()}</div>`+
-    `<div id="detailBody">${data.events.map(msgHTML).join("")||'<div class="empty">표시할 대화가 없습니다</div>'}</div>`;
+    // 최신 메시지가 위로 오도록 역순 렌더. summaryCard 의 '내용'(첫 사용자 발화)은
+    // 시간순이어야 하므로 원본 배열은 건드리지 않고 복사본을 뒤집는다.
+    `<div id="detailBody">${data.events.slice().reverse().map(msgHTML).join("")||'<div class="empty">표시할 대화가 없습니다</div>'}</div>`;
   D.scrollTop=0;
   applyMsgFilter();   // 저장된 표시 필터 적용
   $("#inSearch").oninput = e=>inSessionSearch(e.target.value);
