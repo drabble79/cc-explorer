@@ -385,6 +385,11 @@
   #filterBtn { padding:4px 11px; font-size:var(--fs-sm); box-shadow:var(--sh-1); }
   .hide-user .role-user, .hide-asst .role-asst, .hide-tool .role-tool,
   .hide-meta .role-meta, .hide-thinking .think, .hide-tooluse .tool { display:none; }
+  /* 블록이 전부 숨겨져 빈 말풍선만 남는 메시지는 머리글까지 같이 감춘다.
+     hb-think / hb-tool 은 그 메시지가 '숨길 수 있는 유형만' 담고 있음을 뜻한다. */
+  .hide-thinking .hb-all.hb-think:not(.hb-tool),
+  .hide-tooluse  .hb-all.hb-tool:not(.hb-think),
+  .hide-thinking.hide-tooluse .hb-all.hb-think.hb-tool { display:none; }
 
   /* ==================== 상세 — 요약 카드 ==================== */
   #sumCard { position:relative; margin:var(--s4) var(--s5) var(--s2);
@@ -416,10 +421,12 @@
                display:flex; gap:var(--s2); align-items:center; }
   .bubble { background:var(--surface); border:1px solid var(--line); border-radius:var(--r3);
             padding:var(--s3) var(--s4); }
-  /* 역할 구분은 색 대신 면·테두리 차이로 */
-  .role-user .bubble { background:var(--surface-2); border-color:var(--line-2); }
-  .role-user .head b { color:var(--fg-2); font-weight:700; }
-  .role-asst .head b { color:var(--accent); font-weight:700; }
+  /* 사용자 발화는 대화를 훑을 때의 기준점이라 액센트를 몰아준다 —
+     틴트 배경 + 좌측 레일. assistant 는 기본 면으로 두어 대비를 만든다. */
+  .role-user .bubble { background:var(--tint); border-color:var(--tint-2);
+                       border-left:3px solid var(--accent); }
+  .role-user .head b { color:var(--accent); font-weight:700; }
+  .role-asst .head b { color:var(--fg-2); font-weight:700; }
   .role-tool { margin-left:var(--s5); }
   .role-tool .bubble { background:transparent; border:none; padding:0; }
   .role-tool .head b { color:var(--muted); font-weight:600; }
@@ -790,14 +797,15 @@ async function resumeSession(cwd, sid){
   if(await copyText(cmd)) toast("resume 명령을 복사했어요 — 터미널에 붙여넣으세요");
   else toast("복사 실패", true);
 }
-const SYS_RE0 = /^<(ide_opened_file|system-reminder|command-name|command-message|local-command|command-args)/;
 // 세션 요약 카드
 function summaryCard(data){
   const m=data.meta, s=data.stats||{}, tok=s.tokens||{};
-  // 내용 요약: 첫 사용자 발화(시스템 주입 제외)
+  // 내용 요약: 첫 사용자 발화. 주입 메시지(작업 알림·슬래시 명령 등)는 서버가
+  // ev.inject 로 걸러주므로 여기서 다시 정규식을 돌리지 않는다.
   let goal="";
-  for(const ev of data.events){ if(ev.role!=="user") continue;
-    const tb=ev.blocks.find(b=>b.kind==="text" && !SYS_RE0.test(b.text.trim()));
+  for(const ev of data.events){
+    if(ev.role!=="user" || ev.inject) continue;
+    const tb=ev.blocks.find(b=>b.kind==="text" && !SYS_RE.test(b.text.trim()));
     if(tb){ goal=tb.text.trim().replace(/\s+/g," ").slice(0,240); break; } }
   const tools=Object.entries(s.tools||{}).sort((a,b)=>b[1]-a[1]);
   const toolStr=tools.slice(0,8).map(([k,v])=>`${esc(k)}<span class="tc">${v}</span>`).join(" ");
@@ -1426,13 +1434,34 @@ function blockHTML(b, md){
   if(b.kind==="image") return `<div class="blk"><em style="color:var(--muted)">[이미지]</em></div>`;
   return "";
 }
-const SYS_RE = /^<(ide_opened_file|system-reminder|command-name|local-command)/;
+const SYS_RE = /^<(ide_opened_file|system-reminder|command-name|command-message|command-args|local-command)/;
+// 주입 메시지 종류별 표시 이름. 슬래시 명령과 작업 알림은 알맹이를 뽑아 제목에 쓴다.
+function injectLabel(kind, text){
+  const pick = re => { const m=String(text).match(re); return m ? m[1].trim() : ""; };
+  switch(kind){
+    case "task-notification": {
+      const s = pick(/<summary>([\s\S]*?)<\/summary>/);
+      return {icon:"🔔", label: s ? "작업 알림 · "+s.slice(0,60) : "백그라운드 작업 알림"};
+    }
+    case "command-name": {
+      const c = pick(/<command-name>([\s\S]*?)<\/command-name>/);
+      return {icon:"⌘", label: c || "슬래시 명령"};
+    }
+    case "compact":              return {icon:"🗜", label:"컨텍스트 압축 요약"};
+    case "local-command-stdout": return {icon:"⌘", label:"명령 출력"};
+    case "local-command-caveat": return {icon:"⚠", label:"명령 주의 안내"};
+    case "system-reminder":      return {icon:"📎", label:"시스템 리마인더"};
+    case "ide_opened_file":      return {icon:"📄", label:"IDE 열린 파일"};
+    default:                     return {icon:"📎", label:"주입 컨텍스트"};
+  }
+}
 function msgHTML(ev){
   // Claude Code 의 user role 에는 3종류가 섞여 있다:
   //  ① 실제 사용자 입력  ② 도구 결과(tool_result)  ③ 하니스 주입(isMeta: 스킬 본문/시스템 컨텍스트)
   const isToolResult = ev.role==="user" && ev.blocks.length>0
                        && ev.blocks.every(b=>b.kind==="tool_result");
-  const isMeta = ev.role==="user" && ev.isMeta && !isToolResult;
+  // ev.inject: 서버가 판정한 '사용자 입력이 아님'의 종류 (task-notification, 슬래시 명령 등)
+  const isMeta = ev.role==="user" && !isToolResult && (ev.isMeta || !!ev.inject);
   const role = ev.role==="assistant" ? "asst"
              : isToolResult ? "tool"
              : isMeta ? "meta" : "user";
@@ -1445,14 +1474,25 @@ function msgHTML(ev){
   // 메타(주입) 메시지: 길고 사용자와 무관하므로 기본 접힘
   if(role==="meta"){
     const firstTxt = (ev.blocks.find(b=>b.kind==="text")||{}).text || "";
-    const peek = esc(firstTxt.replace(/\s+/g," ").slice(0,70));
-    return `<div class="msg role-meta"><div class="head"><b>📎 주입 컨텍스트</b>`+
-      `<span>${fmtTime(ev.ts)}</span><span class="dim">스킬·시스템</span></div>`+
+    const info = injectLabel(ev.inject, firstTxt);
+    // 봉투 태그를 걷어낸 본문 미리보기
+    const peek = esc(firstTxt.replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim().slice(0,70));
+    return `<div class="msg role-meta"><div class="head"><b>${info.icon} ${esc(info.label)}</b>`+
+      `<span>${fmtTime(ev.ts)}</span></div>`+
       `<details class="sys"><summary>${peek||"주입된 내용"} … (펼치기)</summary>`+
       `<div class="bubble">${blocks}</div></details></div>`;
   }
+  // 표시 필터로 안이 전부 비는 메시지는 말풍선과 머리글까지 통째로 감춘다.
+  // (예: thinking + 도구 호출만 있는 assistant 메시지에서 둘 다 끈 경우)
+  // 어떤 유형이 들어 있는지 렌더 시점에 클래스로 남겨두면, 토글할 때 CSS 선택자만으로
+  // 판정된다 — 6만 노드를 순회하는 비용이 들지 않는다.
+  const kinds = new Set(ev.blocks.map(b=>b.kind));
+  const allHideable = kinds.size>0 && [...kinds].every(k=>k==="thinking"||k==="tool_use");
+  const hb = allHideable
+    ? " hb-all"+(kinds.has("thinking")?" hb-think":"")+(kinds.has("tool_use")?" hb-tool":"")
+    : "";
   const who = role==="asst" ? "🤖 Assistant" : role==="tool" ? "🔧 도구 결과" : "🧑 User";
-  return `<div class="msg role-${role}">`+
+  return `<div class="msg role-${role}${hb}">`+
     `<div class="head"><b>${who}</b><span>${fmtTime(ev.ts)}</span>`+
     (ev.model?`<span>${esc(shortModel(ev.model))}</span>`:"")+
     (ev.isSidechain?`<span>↳ sidechain</span>`:"")+`</div>`+

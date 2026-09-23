@@ -178,6 +178,36 @@ def _normalize_content(content):
     return blocks
 
 
+# user role 이지만 사람이 친 입력이 아닌 것들. Claude Code 는 이걸 전부 user 로 적는다.
+#   - task-notification : 백그라운드 작업 완료 알림 (origin/promptSource 로 확실히 구분된다)
+#   - command-* / local-command-* : 슬래시 명령 봉투와 그 출력
+#   - system-reminder / ide_opened_file : 하니스 주입
+# 앞의 둘과 달리 슬래시 명령 계열은 구분용 필드가 없어 선두 태그로 판별할 수밖에 없다.
+INJECT_TAG_RE = re.compile(
+    r"^\s*<(system-reminder|ide_opened_file|command-name|command-message|command-args"
+    r"|local-command-stdout|local-command-caveat|task-notification)\b")
+
+
+def _inject_kind(obj, blocks):
+    """주입된 메시지면 그 종류를, 진짜 사용자 입력이면 None 을 돌려준다."""
+    origin = obj.get("origin")
+    if isinstance(origin, dict) and origin.get("kind") == "task-notification":
+        return "task-notification"
+    if obj.get("promptSource") == "system":
+        return "task-notification"
+    if obj.get("isCompactSummary"):      # 컨텍스트가 넘쳐 압축될 때 하니스가 넣는 요약
+        return "compact"
+    # 태그가 isMeta 보다 구체적이다(local-command-caveat 는 isMeta 도 True 다).
+    # 사용자가 친 글 뒤에 <system-reminder> 가 덧붙는 경우가 있어서 첫 텍스트 블록만 본다.
+    for b in blocks:
+        if b["kind"] == "text":
+            m = INJECT_TAG_RE.match(b["text"])
+            if m:
+                return m.group(1)
+            break
+    return "meta" if obj.get("isMeta") else None
+
+
 def _find_session_file(sid):
     """sessionId 로 .jsonl 파일 경로 찾기 (전 디렉토리 탐색)."""
     if not sid:
@@ -266,6 +296,8 @@ def parse_session(path):
             "blocks": blocks,
             "isSidechain": bool(obj.get("isSidechain")),
             "isMeta": bool(obj.get("isMeta")),   # 하니스 주입(스킬 본문/시스템 컨텍스트)
+            # user 로 적혀 있지만 사람이 친 게 아닌 것의 종류. None 이면 진짜 사용자 입력.
+            "inject": _inject_kind(obj, blocks) if t == "user" else None,
         })
 
     fork = None
