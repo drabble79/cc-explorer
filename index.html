@@ -1498,6 +1498,23 @@ function msgHTML(ev){
     (ev.isSidechain?`<span>↳ sidechain</span>`:"")+`</div>`+
     `<div class="bubble">${blocks}</div></div>`;
 }
+// 세션을 열면 맨 아래(= 최신 메시지)로 내린다.
+// content-visibility 때문에 처음 scrollHeight 는 추정값이고, 화면에 들어온 메시지가
+// 실제로 레이아웃되면서 높이가 계속 바뀐다. 한 번만 내리면 바닥에 닿지 못하므로
+// 몇 프레임에 걸쳐 다시 내리되, 사용자가 스크롤을 잡으면 즉시 멈춘다.
+function scrollToBottom(el){
+  const ac = new AbortController();
+  const stop = ()=>ac.abort();
+  el.addEventListener("wheel", stop, {passive:true, signal:ac.signal});
+  el.addEventListener("touchstart", stop, {passive:true, signal:ac.signal});
+  let frames = 12;
+  (function step(){
+    if(ac.signal.aborted) return;
+    el.scrollTop = el.scrollHeight;
+    if(--frames > 0) requestAnimationFrame(step);
+    else ac.abort();            // 리스너 정리
+  })();
+}
 async function openSession(file){
   curFile = file;
   document.querySelectorAll(".sess.sel").forEach(s=>s.classList.remove("sel"));
@@ -1521,10 +1538,8 @@ async function openSession(file){
     ` · ${data.events.length}개 메시지${m.badLines?(" · 깨진줄 "+m.badLines):""}</span></div>`+
     summaryCard(data)+
     `<div id="filterFloat">${filterControlHTML()}</div>`+
-    // 최신 메시지가 위로 오도록 역순 렌더. summaryCard 의 '내용'(첫 사용자 발화)은
-    // 시간순이어야 하므로 원본 배열은 건드리지 않고 복사본을 뒤집는다.
-    `<div id="detailBody">${data.events.slice().reverse().map(msgHTML).join("")||'<div class="empty">표시할 대화가 없습니다</div>'}</div>`;
-  D.scrollTop=0;
+    `<div id="detailBody">${data.events.map(msgHTML).join("")||'<div class="empty">표시할 대화가 없습니다</div>'}</div>`;
+  scrollToBottom(D);   // 시간순이라 최신 메시지는 맨 아래에 있다
   applyMsgFilter();   // 저장된 표시 필터 적용
   // 이전 세션의 검색 상태가 남지 않게 초기화
   clearTimeout(inSearchTimer); searchMarks=[]; searchIdx=-1; lastSearched="";
