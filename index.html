@@ -264,6 +264,12 @@
   .row.sel .ncount { color:var(--accent); background:var(--tint-2); }
   .children { display:none; margin-left:14px; border-left:1px solid var(--line); }
   .node.open > .children { display:block; }
+  /* 즐겨찾기 — 트리 맨 위 고정 항목 */
+  .favnode { margin-bottom:var(--s2); padding-bottom:var(--s2);
+             border-bottom:1px solid var(--line); }
+  .favrow .favstar { flex:0 0 14px; width:14px; text-align:center; color:var(--warn);
+                     font-size:var(--fs-sm); line-height:1; }
+  .favrow.sel .favstar { color:var(--warn); }
 
   /* ==================== 세션 목록 ==================== */
   .bhead { position:sticky; top:0; z-index:3; display:flex; align-items:center; gap:var(--s2);
@@ -290,7 +296,14 @@
   .forktag { color:var(--info); background:var(--info-tint); border-radius:var(--r1);
              padding:1px 6px; font-size:var(--fs-xs); font-weight:600; }
   .sess .t { font-weight:600; font-size:var(--fs-md); color:var(--fg); margin-bottom:3px;
-             overflow:hidden; text-overflow:ellipsis; white-space:nowrap; line-height:1.5; }
+             overflow:hidden; text-overflow:ellipsis; white-space:nowrap; line-height:1.5;
+             padding-right:22px; }   /* 우상단 별 버튼 자리 */
+  .sess .favbtn { position:absolute; top:6px; right:6px; background:none; border:none;
+                  color:var(--line-2); cursor:pointer; font-size:var(--fs-base); line-height:1;
+                  padding:3px 5px; border-radius:var(--r1);
+                  transition:color .14s, background .14s; }
+  .sess .favbtn:hover { color:var(--warn); background:var(--surface-3); }
+  .sess .favbtn.on { color:var(--warn); }
   .sess .sub { color:var(--muted); font-size:var(--fs-sm); overflow:hidden;
                text-overflow:ellipsis; white-space:nowrap; }
   .sess .meta { color:var(--muted); font-size:var(--fs-xs); margin-top:var(--s2);
@@ -325,6 +338,8 @@
              vertical-align:middle; }
   .minibtn.resume { color:var(--accent); background:var(--tint); border-color:var(--tint-2); }
   .minibtn.resume:hover { background:var(--tint-2); border-color:var(--accent); color:var(--accent); }
+  .minibtn.fav.on { color:var(--warn); background:var(--warn-tint); border-color:transparent; }
+  .minibtn.fav.on:hover { color:var(--warn); border-color:var(--warn); background:var(--warn-tint); }
   .minibtn.danger { color:var(--danger); background:var(--danger-tint); border-color:transparent; }
   .minibtn.danger:hover { color:var(--danger); border-color:var(--danger);
                           background:var(--danger-tint); }
@@ -574,6 +589,43 @@ let curListTitle = "";
 let cleanupDays = 30;       // settings.cleanupPeriodDays (없으면 30) — 삭제 카운트다운 기준
 let selectMode = false;     // 목록 선택 모드
 const selected = new Set(); // 선택된 세션 file 경로
+let curListIsFav = false;   // 현재 목록이 즐겨찾기 뷰인지 (토글 시 즉시 반영해야 함)
+
+// ---------- 즐겨찾기 ----------
+// 파일 경로가 아니라 세션 uuid 로 저장한다 — 경로는 프로젝트 폴더가 바뀌면 달라진다.
+function loadFavs(){
+  try{ const a=JSON.parse(localStorage.getItem("ccsv-favs")||"[]");
+       return new Set(Array.isArray(a)?a:[]); }catch(e){ return new Set(); }
+}
+const favorites = loadFavs();
+function saveFavs(){ try{ localStorage.setItem("ccsv-favs", JSON.stringify([...favorites])); }catch(e){} }
+function isFav(s){ return !!s && favorites.has(s.uuid); }
+function favSessions(){ return SESSIONS.filter(s=>favorites.has(s.uuid)); }
+// 트리의 즐겨찾기 개수만 갱신 (트리 전체를 다시 그리면 펼침/스크롤이 튄다)
+function updateFavCount(){
+  const el=document.querySelector("#tree .favrow .ncount");
+  if(el) el.textContent = favSessions().length;
+}
+// 타임라인 헤더의 즐겨찾기 버튼 표시 동기화
+function syncSumFav(s){
+  const fb=$("#favBtn");
+  if(!fb || !curFile || curFile!==s.file) return;
+  const on=isFav(s);
+  fb.classList.toggle("on", on);
+  fb.textContent = (on?"★":"☆")+" 즐겨찾기";
+}
+// btn 을 넘기면 목록 전체를 다시 그리지 않고 그 버튼만 바꾼다(스크롤 위치 보존).
+// 즐겨찾기 뷰에서는 항목이 빠져야 하므로 목록을 다시 그린다.
+function toggleFav(s, btn){
+  const on = !favorites.has(s.uuid);
+  if(on) favorites.add(s.uuid); else favorites.delete(s.uuid);
+  saveFavs();
+  updateFavCount();
+  if(curListIsFav) rerenderList();
+  else if(btn){ btn.classList.toggle("on", on); btn.textContent = on?"★":"☆";
+                btn.title = on?"즐겨찾기 해제":"즐겨찾기"; }
+  syncSumFav(s);
+}
 
 // ---------- 삭제 카운트다운 ----------
 const DAY_MS = 86400000;
@@ -652,7 +704,10 @@ function dateBtnLabel(){
 }
 function updateDateBtn(){ const b=$("#dateBtn"); if(!b) return;
   b.textContent=dateBtnLabel(); b.classList.toggle("active", dateFilterActive()); }
-function rerenderList(){ if(curListRaw.length || curListTitle) showList(curListRaw, curListTitle); }
+function rerenderList(){
+  if(curListIsFav) showList(favSessions(), curListTitle, true);   // 별 해제분이 즉시 빠지게
+  else if(curListRaw.length || curListTitle) showList(curListRaw, curListTitle);
+}
 // 필터 변경 시: 저장 → 버튼 → 좌측 트리 카운트 갱신 → 가운데 목록 재적용
 function onFilterChanged(){ saveDateFilter(); updateDateBtn(); renderTree(false); rerenderList(); }
 function setupDatePopover(){
@@ -729,6 +784,8 @@ function summaryCard(data){
   rows.push(`<div class="srow"><span class="sk">세션ID</span><span class="sv">`+
     `<code class="sid">${esc(m.uuid)}</code>`+
     `<button class="minibtn resume" id="resumeBtn" title="resume 명령을 클립보드에 복사">▶ resume</button>`+
+    `<button class="minibtn fav${favorites.has(m.uuid)?" on":""}" id="favBtn" title="즐겨찾기">`+
+      `${favorites.has(m.uuid)?"★":"☆"} 즐겨찾기</button>`+
     `<button class="minibtn extend" id="extendBtn" title="삭제 시계를 지금 기준 ${cleanupDays}일로 리셋">⏱ 연장</button>`+
     `</span></div>`);
   rows.push(`<div class="srow"><span class="sk">기간</span><span class="sv">${fmtTime(s.firstTs||m.firstTs)} ~ ${fmtTime(s.lastTs||m.lastTs)} <span class="dim">(${fmtDur(s.firstTs,s.lastTs)})</span></span></div>`);
@@ -816,6 +873,26 @@ function renderNode(node, pred){
   };
   return el;
 }
+// 트리 맨 위에 고정되는 가상 노드. 디렉토리가 아니라 별을 단 세션 묶음을 보여준다.
+// dataset.path 를 둬서 기존 선택 복원 로직(path 기반)을 그대로 탄다.
+function favRow(){
+  const el=document.createElement("div"); el.className="node favnode";
+  const row=document.createElement("div"); row.className="row favrow";
+  row.dataset.path="__fav__";
+  row.title="즐겨찾기한 세션";
+  row.innerHTML=`<span class="tw"></span><span class="favstar">★</span>`+
+    `<span class="nlabel"><span class="nlast">즐겨찾기</span></span>`+
+    `<span class="ncount">${favSessions().length}</span>`;
+  row.onclick=(e)=>{
+    e.stopPropagation();
+    document.querySelectorAll("#tree .row.sel").forEach(r=>r.classList.remove("sel"));
+    row.classList.add("sel");
+    clearSearchMarks();
+    showList(favSessions(), "즐겨찾기", true);
+  };
+  el.appendChild(row);
+  return el;
+}
 // 트리 전체를 (필터 반영해) 렌더. 펼침/선택 상태는 유지. autoOpenFirst 는 초기 로드용.
 let TREE = null;
 function renderTree(autoOpenFirst){
@@ -826,14 +903,16 @@ function renderTree(autoOpenFirst){
   const selEl=treeBox.querySelector(".row.sel"); const selPath=selEl?selEl.dataset.path:null;
   const pred=makeDatePredicate();
   treeBox.innerHTML="";
+  treeBox.appendChild(favRow());   // 기간 필터와 무관하게 항상 맨 위에
   const kids=Object.values(TREE.children)
     .map(k=>[k, nodeFilteredCount(k, pred)]).filter(([,c])=>c>0)
     .sort((a,b)=>b[1]-a[1]).map(([k])=>k);
   if(!kids.length){
-    treeBox.innerHTML='<div class="empty">'+(dateFilterActive()?"이 기간에 세션이 없습니다":"세션 없음")+'</div>';
-    return;
+    treeBox.insertAdjacentHTML("beforeend",
+      '<div class="empty">'+(dateFilterActive()?"이 기간에 세션이 없습니다":"세션 없음")+'</div>');
+  } else {
+    for(const k of kids){ const el=renderNode(k, pred); if(el) treeBox.appendChild(el); }
   }
-  for(const k of kids){ const el=renderNode(k, pred); if(el) treeBox.appendChild(el); }
   // 복원: 펼침 + 선택
   let restoredSel=false;
   treeBox.querySelectorAll(".row").forEach(r=>{
@@ -841,7 +920,9 @@ function renderTree(autoOpenFirst){
     if(p && openPaths.has(p)){ const nd=r.closest(".node"); if(nd) nd.classList.add("open"); }
     if(p && selPath && p===selPath){ r.classList.add("sel"); restoredSel=true; }
   });
-  if(autoOpenFirst && !restoredSel){ const firstRow=treeBox.querySelector(".row"); if(firstRow) firstRow.click(); }
+  // 최초 로드에서 자동으로 펼칠 대상은 즐겨찾기가 아니라 첫 디렉토리다
+  if(autoOpenFirst && !restoredSel){
+    const firstRow=treeBox.querySelector(".row:not(.favrow)"); if(firstRow) firstRow.click(); }
 }
 
 // ---------- 목록 ----------
@@ -852,7 +933,9 @@ function sessEl(s, depth=0, forkMark=null){
   const models = (s.models||[]).map(shortModel).join(", ");
   const fork = forkMark ? `<span class="forktag" title="${esc(forkMark)}">⑂ 분기</span> ` : "";
   const chk = selectMode ? `<input type="checkbox" class="selchk" ${selected.has(s.file)?"checked":""}>` : "";
-  d.innerHTML = `<div class="t">${chk}${fork}${esc(ttl)}</div>`+
+  const fav = isFav(s);
+  d.innerHTML = `<button class="favbtn${fav?" on":""}" title="${fav?"즐겨찾기 해제":"즐겨찾기"}">${fav?"★":"☆"}</button>`+
+    `<div class="t">${chk}${fork}${esc(ttl)}</div>`+
     (s.lastPrompt && s.aiTitle?`<div class="sub">${esc(s.lastPrompt)}</div>`:"")+
     `<div class="meta"><span>${fmtTime(s.lastTs)}</span>`+
     `<span class="badge">${s.msgCount}msg</span>`+
@@ -867,6 +950,8 @@ function sessEl(s, depth=0, forkMark=null){
   if(cb) cb.onclick=(e)=>{ e.stopPropagation(); toggleSelect(s.file, cb.checked); };
   const ext=d.querySelector(".extendbtn");
   if(ext) ext.onclick=(e)=>{ e.stopPropagation(); extendSessions([s.file]); };
+  const fb=d.querySelector(".favbtn");
+  if(fb) fb.onclick=(e)=>{ e.stopPropagation(); toggleFav(s, fb); };
   return d;
 }
 // 분기(/branch) 위계를 부모 밑 들여쓰기로 렌더. byIdAll = 전체 세션 인덱스(부모가 다른 그룹/폴더여도 탐지)
@@ -895,15 +980,17 @@ function renderForest(container, list, byIdAll){
   }
   for(const r of roots) walk(r, 0);
 }
-function showList(sessions, title){
-  curListRaw = sessions; curListTitle = title||"";
+function showList(sessions, title, isFavView){
+  curListRaw = sessions; curListTitle = title||""; curListIsFav = !!isFavView;
   curList = applyDateFilter(sessions).slice().sort((a,b)=>(b.lastTs||"").localeCompare(a.lastTs||""));
   const box = $("#list");
   box.innerHTML = "";
   if(!curList.length){
     box.innerHTML = dateFilterActive()
       ? '<div class="empty">이 기간에 세션이 없습니다</div>'
-      : '<div class="empty">세션이 없습니다</div>';
+      : curListIsFav
+        ? '<div class="empty">즐겨찾기한 세션이 없습니다<br><br>세션 카드의 ☆ 를 눌러 추가하세요</div>'
+        : '<div class="empty">세션이 없습니다</div>';
     return;
   }
   box.insertAdjacentHTML("beforeend", listToolbar());
@@ -1021,6 +1108,10 @@ async function doDelete(files){
   catch(e){ toast("삭제 실패", true); return; }
   const okFiles=new Set((r.results||[]).filter(x=>x.ok).map(x=>x.file));
   const okN=okFiles.size, failN=(r.results||[]).length-okN;
+  // 지워진 세션의 즐겨찾기도 함께 정리 (SESSIONS 를 줄이기 전에 uuid 를 뽑아둔다)
+  let favChanged=false;
+  for(const s of SESSIONS) if(okFiles.has(s.file) && favorites.delete(s.uuid)) favChanged=true;
+  if(favChanged) saveFavs();
   SESSIONS=SESSIONS.filter(s=>!okFiles.has(s.file));
   curListRaw=curListRaw.filter(s=>!okFiles.has(s.file));
   okFiles.forEach(f=>selected.delete(f));
@@ -1245,6 +1336,9 @@ async function openSession(file){
   if(resumeBtn) resumeBtn.onclick=()=>resumeSession(m.cwd, m.uuid);
   const extendBtn=$("#extendBtn");
   if(extendBtn) extendBtn.onclick=()=>extendSessions([m.file]);
+  const favBtn=$("#favBtn");
+  // 목록 카드의 별도 함께 바뀌어야 하므로 btn 은 넘기지 않고 목록을 다시 그린다
+  if(favBtn) favBtn.onclick=()=>{ toggleFav(m); if(!curListIsFav) rerenderList(); };
   const pl=D.querySelector(".plink"); if(pl) pl.onclick=()=>openSession(pl.dataset.pf);
   // tool_result 더보기/접기 — 전체 텍스트는 이미 렌더돼 있고 CSS 로 높이만 제한
   D.querySelectorAll(".toolres .more").forEach(el=>{
