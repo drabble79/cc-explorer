@@ -678,6 +678,7 @@ async function loadCleanupDays(){
   }catch(e){/* 기본 30 유지 */}
 }
 let curFile = null;
+let curEventCount = 0;      // 마지막으로 그린 세션의 메시지 수 (새로고침 시 증감 표시용)
 
 // ---------- 날짜(기간) 필터 — 마지막 활동(lastTs) 기준, 목록에만 적용, localStorage 저장 ----------
 function loadDateFilter(){
@@ -1502,18 +1503,35 @@ function msgHTML(ev){
 // content-visibility 때문에 처음 scrollHeight 는 추정값이고, 화면에 들어온 메시지가
 // 실제로 레이아웃되면서 높이가 계속 바뀐다. 한 번만 내리면 바닥에 닿지 못하므로
 // 몇 프레임에 걸쳐 다시 내리되, 사용자가 스크롤을 잡으면 즉시 멈춘다.
+// 타이머로 몇 번 내려보는 방식은 그 뒤에 높이가 더 자라면 바닥에 못 닿는다.
+// 내용 높이가 바뀌는 순간을 ResizeObserver 로 직접 잡아 그때마다 다시 붙인다.
 function scrollToBottom(el){
+  const body = el.querySelector("#detailBody") || el;
+  let cancelled = false;
   const ac = new AbortController();
-  const stop = ()=>ac.abort();
+  const pin = ()=>{ if(!cancelled) el.scrollTop = el.scrollHeight; };
+  const cleanup = ()=>{ ro.disconnect(); ac.abort(); clearTimeout(timer); };
+  const stop = ()=>{ cancelled = true; cleanup(); };   // 사용자가 스크롤을 잡으면 즉시 양보
   el.addEventListener("wheel", stop, {passive:true, signal:ac.signal});
   el.addEventListener("touchstart", stop, {passive:true, signal:ac.signal});
-  let frames = 12;
-  (function step(){
-    if(ac.signal.aborted) return;
-    el.scrollTop = el.scrollHeight;
-    if(--frames > 0) requestAnimationFrame(step);
-    else ac.abort();            // 리스너 정리
-  })();
+  const ro = new ResizeObserver(pin);
+  ro.observe(body);
+  const timer = setTimeout(cleanup, 3000);   // 오래 붙잡고 있지는 않는다
+  pin();
+}
+// 지금 열려 있는 세션만 파일에서 다시 읽는다.
+// 다른 터미널에서 계속 진행 중인 세션을 따라볼 때 쓴다 — 늘어난 메시지 수를 알려주고,
+// openSession 이 맨 아래로 내려주므로 새로 붙은 대화가 바로 보인다.
+async function reloadSession(){
+  if(!curFile) return;
+  const before = curEventCount;
+  const file = curFile;
+  await openSession(file);
+  if(curFile !== file) return;                 // 로딩 중 다른 세션으로 옮겨갔으면 조용히 끝낸다
+  const added = curEventCount - before;
+  toast(added>0 ? `새로고침 · 메시지 ${added}개 늘었습니다`
+       : added<0 ? `새로고침 · 메시지 ${-added}개 줄었습니다`
+       : "새로고침 · 달라진 내용이 없습니다");
 }
 async function openSession(file){
   curFile = file;
@@ -1522,10 +1540,17 @@ async function openSession(file){
   const D=$("#detail");
   D.innerHTML='<div class="spin">불러오는 중…</div>';
   let data;
-  try{ data=await (await fetch("/api/session?file="+encodeURIComponent(file))).json(); }
+  // no-store: 새로고침 버튼이 브라우저 캐시에 걸려 옛 내용을 다시 보여주면 안 된다
+  try{ data=await (await fetch("/api/session?file="+encodeURIComponent(file),
+                              {cache:"no-store"})).json(); }
   catch(e){ D.innerHTML='<div class="empty">불러오기 실패</div>'; return; }
   if(data.error){ D.innerHTML=`<div class="empty">${esc(data.error)}</div>`; return; }
   const m=data.meta;
+  curEventCount = data.events.length;
+  // 목록 카드가 들고 있는 메타(메시지 수·마지막 활동)도 방금 읽은 값으로 맞춰둔다.
+  // 목록을 다시 그리면 스크롤이 튀므로 객체만 갱신하고 렌더는 건드리지 않는다.
+  const known = SESSIONS.find(s=>s.file===file);
+  if(known) Object.assign(known, m);
   const ttl=m.aiTitle||m.lastPrompt||m.uuid;
   D.innerHTML =
     `<div id="detailBar"><span class="ttl">${esc(ttl)}</span>`+
@@ -1533,6 +1558,9 @@ async function openSession(file){
     `<span id="inPrev" class="navbtn" title="이전 (Shift+Enter)">‹</span>`+
     `<span id="inCount"></span>`+
     `<span id="inNext" class="navbtn" title="다음 (Enter)">›</span></span>`+
+    // 새로고침은 스크롤과 무관하게 늘 보여야 하므로 sticky 한 상단 바에 둔다.
+    // (요약 카드는 세션을 열자마자 맨 아래로 내려가 화면 밖으로 밀린다)
+    `<button class="minibtn" id="reloadBtn" title="이 세션만 파일에서 다시 읽는다">↻ 새로고침</button>`+
     `<span class="grow" style="flex:1"></span>`+
     `<span style="color:var(--muted);font-size:11px">${esc(m.cwd||"")}`+
     ` · ${data.events.length}개 메시지${m.badLines?(" · 깨진줄 "+m.badLines):""}</span></div>`+
@@ -1567,6 +1595,8 @@ async function openSession(file){
   const favBtn=$("#favBtn");
   // 목록 카드의 별도 함께 바뀌어야 하므로 btn 은 넘기지 않고 목록을 다시 그린다
   if(favBtn) favBtn.onclick=()=>{ toggleFav(m); if(!curListIsFav) rerenderList(); };
+  const reloadBtn=$("#reloadBtn");
+  if(reloadBtn) reloadBtn.onclick=()=>reloadSession();
   const pl=D.querySelector(".plink"); if(pl) pl.onclick=()=>openSession(pl.dataset.pf);
   // tool_result 더보기/접기 — 전체 텍스트는 이미 렌더돼 있고 CSS 로 높이만 제한
   D.querySelectorAll(".toolres .more").forEach(el=>{
