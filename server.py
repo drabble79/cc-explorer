@@ -6,9 +6,11 @@
 """
 import json
 import os
+import re
 import shutil
 import sys
 import threading
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -17,6 +19,12 @@ from urllib.parse import urlparse, parse_qs
 HERE = Path(__file__).resolve().parent
 SESSIONS_ROOT = (Path.home() / ".claude" / "projects").resolve()
 SETTINGS_FILE = (Path.home() / ".claude" / "settings.json").resolve()
+
+# 휴지통은 projects/ '밖'에 둔다. 안에 두면 Claude Code 와 이 뷰어 양쪽이
+# 버린 세션을 살아있는 세션으로 다시 집어든다.
+TRASH_ROOT = (Path.home() / ".claude" / ".cc-explorer-trash").resolve()
+TRASH_INDEX = TRASH_ROOT / "index.json"
+TRASH_ID_RE = re.compile(r"[A-Za-z0-9._-]{1,120}")
 
 # 목록에서 무시할 노이즈 이벤트
 NOISE_TYPES = {
@@ -352,10 +360,28 @@ def search_all(term):
 
 
 def _safe_session_path(raw):
-    """file 파라미터를 SESSIONS_ROOT 하위로 제한 (경로 탈출 차단)."""
+    """file 파라미터를 SESSIONS_ROOT 하위로 제한 (경로 탈출 차단).
+
+    쓰기(연장·휴지통 이동) 대상은 반드시 이 함수를 거친다.
+    """
     p = Path(raw).resolve()
     try:
         p.relative_to(SESSIONS_ROOT)
+    except ValueError:
+        return None
+    if not p.is_file() or p.suffix != ".jsonl":
+        return None
+    return p
+
+
+def _safe_readable_path(raw):
+    """읽기 전용 경로. 휴지통 항목도 복원 전에 내용을 확인할 수 있어야 한다."""
+    p = _safe_session_path(raw)
+    if p:
+        return p
+    p = Path(raw).resolve()
+    try:
+        p.relative_to(TRASH_ROOT)
     except ValueError:
         return None
     if not p.is_file() or p.suffix != ".jsonl":
@@ -379,8 +405,45 @@ def touch_sessions(files):
     return {"results": results}
 
 
-def delete_sessions(files):
-    """세션 파일들을 영구 삭제한다. 형제 사이드카(<uuid>/, subagents 기록)도 함께 제거."""
+# ---------- 휴지통 ----------
+# 삭제는 2단계다. ① 휴지통으로 이동(복원 가능) ② 휴지통에서 영구 삭제.
+# 항목 하나는 TRASH_ROOT/<id>/ 폴더에 세션 .jsonl 과 사이드카 디렉토리를 함께 담고,
+# 원래 경로 등 복원에 필요한 정보는 index.json 에 적어둔다.
+
+
+def _read_trash_index():
+    if not TRASH_INDEX.is_file():
+        return []
+    try:
+        data = json.loads(TRASH_INDEX.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _write_trash_index(items):
+    TRASH_ROOT.mkdir(parents=True, exist_ok=True)
+    tmp = TRASH_INDEX.with_name(TRASH_INDEX.name + ".tmp")
+    tmp.write_text(json.dumps(items, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(TRASH_INDEX)   # 중간에 죽어도 인덱스가 깨지지 않게
+
+
+def _trash_entry_dir(entry_id):
+    """휴지통 항목 폴더. id 를 그대로 경로에 붙이므로 탈출을 막는다."""
+    if not entry_id or not TRASH_ID_RE.fullmatch(str(entry_id)):
+        return None
+    p = (TRASH_ROOT / entry_id).resolve()
+    try:
+        p.relative_to(TRASH_ROOT)
+    except ValueError:
+        return None
+    return p
+
+
+def trash_sessions(files):
+    """세션을 휴지통으로 옮긴다. 사이드카 디렉토리도 같이 옮겨 복원에 대비한다."""
+    items = _read_trash_index()
+    known = {it.get("id") for it in items}
     results = []
     for raw in files or []:
         p = _safe_session_path(raw)
@@ -388,17 +451,120 @@ def delete_sessions(files):
             results.append({"file": raw, "ok": False, "error": "invalid file"})
             continue
         try:
-            os.remove(p)
-            sidecar = p.with_suffix("")  # .../<uuid>.jsonl → .../<uuid>
+            meta = scan_meta(p)
+        except OSError:
+            meta = {}
+        entry_id, n = p.stem, 1
+        while entry_id in known or (TRASH_ROOT / entry_id).exists():
+            entry_id = "%s-%d" % (p.stem, n)
+            n += 1
+        dest = TRASH_ROOT / entry_id
+        try:
+            dest.mkdir(parents=True, exist_ok=False)
+            shutil.move(str(p), str(dest / p.name))
+            sidecar = p.with_suffix("")          # .../<uuid>.jsonl → .../<uuid>
             if sidecar.is_dir():
-                try:
-                    sidecar.relative_to(SESSIONS_ROOT)  # 경로 탈출 방지
-                    shutil.rmtree(sidecar)
-                except ValueError:
-                    pass
-            results.append({"file": raw, "ok": True})
+                shutil.move(str(sidecar), str(dest / sidecar.name))
         except OSError as e:
             results.append({"file": raw, "ok": False, "error": str(e)})
+            continue
+        known.add(entry_id)
+        items.append({
+            "id": entry_id,
+            "uuid": meta.get("uuid") or p.stem,
+            "origFile": str(p),
+            "name": p.name,
+            "deletedAt": time.time(),
+            "aiTitle": meta.get("aiTitle"),
+            "lastPrompt": meta.get("lastPrompt"),
+            "lastTs": meta.get("lastTs"),
+            "msgCount": meta.get("msgCount") or 0,
+            "size": meta.get("size") or 0,
+            "models": meta.get("models") or [],
+            "gitBranch": meta.get("gitBranch"),
+            "cwd": meta.get("cwd"),
+        })
+        results.append({"file": raw, "ok": True, "id": entry_id})
+    _write_trash_index(items)
+    return {"results": results}
+
+
+def list_trash():
+    """휴지통 목록. 실제 파일이 사라진 항목은 인덱스에서 걷어낸다."""
+    items = _read_trash_index()
+    out, kept, changed = [], [], False
+    for it in items:
+        d = _trash_entry_dir(it.get("id"))
+        f = (d / it["name"]) if (d and it.get("name")) else None
+        if not f or not f.is_file():
+            changed = True
+            continue
+        kept.append(it)
+        entry = dict(it)
+        entry["file"] = str(f)
+        out.append(entry)
+    if changed:
+        _write_trash_index(kept)
+    out.sort(key=lambda e: e.get("deletedAt") or 0, reverse=True)
+    return out
+
+
+def restore_trash(ids):
+    """휴지통 항목을 원래 경로로 되돌린다. 같은 이름이 이미 있으면 덮어쓰지 않는다."""
+    items = _read_trash_index()
+    by_id = {it.get("id"): it for it in items}
+    results, done = [], set()
+    for tid in ids or []:
+        it = by_id.get(tid)
+        d = _trash_entry_dir(tid)
+        if not it or not d or not d.is_dir():
+            results.append({"id": tid, "ok": False, "error": "없는 항목"})
+            continue
+        try:
+            dest = Path(it.get("origFile") or "").resolve()
+            dest.relative_to(SESSIONS_ROOT)     # 복원 위치는 세션 루트 안이어야 한다
+        except (ValueError, OSError):
+            results.append({"id": tid, "ok": False, "error": "복원 위치가 올바르지 않음"})
+            continue
+        if dest.exists():
+            results.append({"id": tid, "ok": False, "error": "같은 이름의 세션이 이미 있음"})
+            continue
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(d / it["name"]), str(dest))
+            sidecar = d / dest.stem
+            if sidecar.is_dir():
+                shutil.move(str(sidecar), str(dest.with_suffix("")))
+            shutil.rmtree(d, ignore_errors=True)
+        except OSError as e:
+            results.append({"id": tid, "ok": False, "error": str(e)})
+            continue
+        done.add(tid)
+        results.append({"id": tid, "ok": True, "file": str(dest)})
+    if done:
+        _write_trash_index([it for it in items if it.get("id") not in done])
+    return {"results": results}
+
+
+def purge_trash(ids=None, purge_all=False):
+    """휴지통에서 영구 삭제한다. 여기서 지우면 복구할 수 없다."""
+    items = _read_trash_index()
+    targets = [it.get("id") for it in items] if purge_all else list(ids or [])
+    results, done = [], set()
+    for tid in targets:
+        d = _trash_entry_dir(tid)
+        if not d:
+            results.append({"id": tid, "ok": False, "error": "잘못된 항목"})
+            continue
+        try:
+            if d.is_dir():
+                shutil.rmtree(d)
+            done.add(tid)
+            results.append({"id": tid, "ok": True})
+        except OSError as e:
+            results.append({"id": tid, "ok": False, "error": str(e)})
+    if done:
+        _write_trash_index([it for it in items if it.get("id") not in done])
     return {"results": results}
 
 
@@ -597,10 +763,12 @@ class Handler(BaseHTTPRequestHandler):
                 })
             if u.path == "/api/session":
                 raw = (q.get("file") or [""])[0]
-                p = _safe_session_path(raw)
+                p = _safe_readable_path(raw)   # 휴지통 항목도 열어볼 수 있다
                 if not p:
                     return self._send_json({"error": "invalid file"}, 400)
                 return self._send_json(parse_session(p))
+            if u.path == "/api/trash":
+                return self._send_json({"root": str(TRASH_ROOT), "items": list_trash()})
             if u.path == "/api/search":
                 term = (q.get("q") or [""])[0].strip()
                 if len(term) < 2:
@@ -631,8 +799,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json(res, 200 if res.get("ok") else 400)
             if u.path == "/api/touch":
                 return self._send_json(touch_sessions(body.get("files")))
-            if u.path == "/api/delete":
-                return self._send_json(delete_sessions(body.get("files")))
+            # 삭제는 휴지통 경유 2단계. 세션 파일을 곧바로 지우는 경로는 두지 않는다.
+            if u.path == "/api/trash":
+                return self._send_json(trash_sessions(body.get("files")))
+            if u.path == "/api/trash/restore":
+                return self._send_json(restore_trash(body.get("ids")))
+            if u.path == "/api/trash/purge":
+                return self._send_json(purge_trash(body.get("ids"), bool(body.get("all"))))
             self.send_error(404)
         except BrokenPipeError:
             pass
