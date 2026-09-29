@@ -35,6 +35,7 @@
     --on-accent:#16121f;
     --tint:rgba(157,124,244,.12);
     --tint-2:rgba(157,124,244,.22);
+    --flash:rgba(157,124,244,.46);    /* User 탐색 강조 — 평소 말풍선과 확실히 갈리게 */
 
     --info:#7d9cc4;             /* 도구 호출 */
     --info-tint:rgba(125,156,196,.12);
@@ -71,6 +72,7 @@
     --on-accent:#ffffff;
     --tint:rgba(109,75,196,.09);
     --tint-2:rgba(109,75,196,.17);
+    --flash:rgba(109,75,196,.32);
 
     --info:#4f7296;
     --info-tint:rgba(79,114,150,.10);
@@ -366,19 +368,19 @@
                background:var(--surface); border-bottom:1px solid var(--line); }
   #detailBar .ttl { font-weight:700; font-size:var(--fs-base); letter-spacing:-.01em;
                     overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:0 1 auto; }
-  .srchbox { display:inline-flex; align-items:center; gap:2px; }
-  #inSearch { background:var(--bg); border:1px solid var(--line); color:var(--fg);
-              border-radius:var(--r2); padding:5px 10px; width:180px; font-size:var(--fs-sm);
-              transition:border-color .14s, box-shadow .14s; }
-  #inSearch::placeholder { color:var(--muted); }
-  #inSearch:hover { border-color:var(--line-2); }
-  .navbtn { cursor:pointer; color:var(--muted); width:24px; height:24px; display:inline-flex;
+  /* User 발화 탐색 */
+  .usernav { display:inline-flex; align-items:center; gap:2px; flex:0 0 auto;
+             background:var(--surface-2); border:1px solid var(--line);
+             border-radius:var(--r2); padding:2px 4px 2px 9px; }
+  .usernav .unav-l { color:var(--fg-2); font-size:var(--fs-xs); font-weight:600;
+                     margin-right:var(--s1); white-space:nowrap; }
+  .navbtn { cursor:pointer; color:var(--muted); width:22px; height:22px; display:inline-flex;
             align-items:center; justify-content:center; border-radius:var(--r1);
             user-select:none; font-size:var(--fs-lg); line-height:1;
             transition:background .14s, color .14s; }
-  .navbtn:hover { color:var(--accent); background:var(--surface-2); }
-  #inCount { color:var(--muted); font-size:var(--fs-xs); min-width:52px; text-align:center;
-             font-variant-numeric:tabular-nums; }
+  .navbtn:hover { color:var(--accent); background:var(--surface-3); }
+  #uCount { color:var(--muted); font-size:var(--fs-xs); min-width:52px; text-align:center;
+            font-variant-numeric:tabular-nums; }
   #filterFloat { position:sticky; top:var(--bar-h); z-index:7; display:flex;
                  justify-content:flex-end; padding:var(--s2) var(--s5) 0; pointer-events:none; }
   .filterwrap { position:relative; pointer-events:auto; }
@@ -468,9 +470,13 @@
   .more { color:var(--info); font-weight:600; cursor:pointer; font-size:var(--fs-sm);
           display:inline-block; margin-top:var(--s2); }
   .more:hover { color:var(--fg); }
-  mark { background:var(--warn-tint); color:var(--fg); border-radius:2px; padding:0 2px;
-         box-shadow:inset 0 -1px 0 var(--warn); }
-  mark.cur { background:var(--accent); color:var(--on-accent); box-shadow:none; }
+  /* User 탐색으로 방금 이동한 메시지를 잠깐 강조.
+     테두리를 덧그리지 않고 배경 단계만 올린다 — User 말풍선은 이미 틴트 배경 +
+     좌측 레일을 쓰고 있어서, 링을 더하면 왼쪽에서 겹쳐 두꺼워 보인다.
+     (참고: .msg 에 content-visibility:auto 가 걸려 paint containment 가 적용되므로
+      자식에 outline 이나 '바깥' box-shadow 를 쓰면 좌·우·아래가 잘린다) */
+  .role-user .bubble { transition:background .5s ease-out, border-color .5s ease-out; }
+  .msg.flash .bubble { background:var(--flash); border-color:var(--accent); transition:none; }
 
   /* ==================== 마크다운 렌더 (assistant 본문) ==================== */
   .blk.md { white-space:normal; }
@@ -1558,10 +1564,11 @@ async function openSession(file){
   const ttl=m.aiTitle||m.lastPrompt||m.uuid;
   D.innerHTML =
     `<div id="detailBar"><span class="ttl">${esc(ttl)}</span>`+
-    `<span class="srchbox"><input id="inSearch" placeholder="이 세션 내 검색">`+
-    `<span id="inPrev" class="navbtn" title="이전 (Shift+Enter)">‹</span>`+
-    `<span id="inCount"></span>`+
-    `<span id="inNext" class="navbtn" title="다음 (Enter)">›</span></span>`+
+    `<span class="usernav" title="사용자 발화만 건너뛰며 보기">`+
+    `<span class="unav-l">🧑 User</span>`+
+    `<span id="uPrev" class="navbtn" title="이전 사용자 발화">‹</span>`+
+    `<span id="uCount"></span>`+
+    `<span id="uNext" class="navbtn" title="다음 사용자 발화">›</span></span>`+
     // 새로고침은 스크롤과 무관하게 늘 보여야 하므로 sticky 한 상단 바에 둔다.
     // (요약 카드는 세션을 열자마자 맨 아래로 내려가 화면 밖으로 밀린다)
     `<button class="minibtn" id="reloadBtn" title="이 세션만 파일에서 다시 읽는다">↻ 새로고침</button>`+
@@ -1572,25 +1579,9 @@ async function openSession(file){
     `<div id="filterFloat">${filterControlHTML()}</div>`+
     `<div id="detailBody">${data.events.map(msgHTML).join("")||'<div class="empty">표시할 대화가 없습니다</div>'}</div>`;
   scrollToBottom(D);   // 시간순이라 최신 메시지는 맨 아래에 있다
-  applyMsgFilter();   // 저장된 표시 필터 적용
-  // 이전 세션의 검색 상태가 남지 않게 초기화
-  clearTimeout(inSearchTimer); searchMarks=[]; searchIdx=-1; lastSearched="";
-  // 긴 세션에서는 검색 한 번에 수만 개 텍스트 노드를 훑는다. 타이핑이 멎은 뒤에만 돌린다.
-  $("#inSearch").oninput = e=>{
-    const q=e.target.value;
-    clearTimeout(inSearchTimer);
-    inSearchTimer=setTimeout(()=>inSessionSearch(q), 150);
-  };
-  $("#inSearch").addEventListener("keydown", e=>{
-    if(e.key!=="Enter") return;
-    e.preventDefault();
-    // 디바운스 대기 중이면 먼저 검색을 끝낸다 (첫 결과로 이동은 inSessionSearch 가 한다)
-    if(e.target.value !== lastSearched){
-      clearTimeout(inSearchTimer); inSessionSearch(e.target.value);
-    } else gotoMatch(e.shiftKey?-1:1);
-  });
-  $("#inPrev").onclick=()=>gotoMatch(-1);
-  $("#inNext").onclick=()=>gotoMatch(1);
+  applyMsgFilter();   // 저장된 표시 필터 적용 + User 탐색 목록 수집
+  $("#uPrev").onclick=()=>gotoUser(-1);
+  $("#uNext").onclick=()=>gotoUser(1);
   setupFilterPopover();
   const resumeBtn=$("#resumeBtn");
   if(resumeBtn) resumeBtn.onclick=()=>resumeSession(m.cwd, m.uuid);
@@ -1609,40 +1600,39 @@ async function openSession(file){
       el.textContent = expanded ? "접기 ▲" : "… 더 보기 ▼"; };
   });
 }
-let searchMarks=[], searchIdx=-1, inSearchTimer=null, lastSearched="";
-function inSessionSearch(q){
-  const body=$("#detailBody"); const cnt=$("#inCount");
-  lastSearched=q;
-  body.querySelectorAll("mark").forEach(mk=>{ mk.replaceWith(document.createTextNode(mk.textContent)); });
-  body.normalize();
-  searchMarks=[]; searchIdx=-1;
-  if(!q || q.length<2){ cnt.textContent=""; return; }
-  const re=new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"gi");
-  const walker=document.createTreeWalker(body,NodeFilter.SHOW_TEXT);
-  const targets=[]; let node;
-  while(node=walker.nextNode()){ const pe=node.parentElement;
-    // 접힌 요약(summary)과 메시지 헤더(역할·시각·모델)는 검색 대상에서 제외 —
-    // 전체 검색 건수(서버)와 대상을 맞춰 건수 불일치를 막는다.
-    if(pe.closest("summary")||pe.closest(".head")) continue;
-    if(re.test(node.nodeValue)) targets.push(node); }
-  for(const t of targets){
-    const frag=document.createDocumentFragment(); let last=0; re.lastIndex=0; let mm;
-    while(mm=re.exec(t.nodeValue)){ frag.appendChild(document.createTextNode(t.nodeValue.slice(last,mm.index)));
-      const mk=document.createElement("mark"); mk.textContent=mm[0]; frag.appendChild(mk); last=mm.index+mm[0].length; }
-    frag.appendChild(document.createTextNode(t.nodeValue.slice(last))); t.parentNode.replaceChild(frag,t);
-  }
-  searchMarks=[...body.querySelectorAll("mark")];
-  if(searchMarks.length){ gotoMatch(1); }     // 첫 항목 포커스
-  else { cnt.textContent="0"; }
+// ---------- User 발화 탐색 ----------
+// 본문 검색은 브라우저의 Ctrl+F 가 더 낫다. 대신 긴 세션에서 '내가 뭘 시켰는지'만
+// 따라 훑는 용도로 사용자 발화 사이를 건너뛴다.
+let userMsgs=[], userIdx=0;
+function collectUserMsgs(){
+  const body=$("#detailBody");
+  // 표시 필터로 User 를 꺼두면 이동할 대상이 없다(클래스만 보면 되므로 레이아웃 비용 0)
+  userMsgs = (body && !body.classList.contains("hide-user"))
+    ? [...body.querySelectorAll(".msg.role-user")] : [];
+  userIdx = userMsgs.length;   // 아직 아무 데도 안 선 상태 = 맨 끝 다음
+  updateUserNav();
 }
-function gotoMatch(delta){
-  if(!searchMarks.length){ $("#inCount").textContent="0"; return; }
-  if(searchIdx>=0 && searchMarks[searchIdx]) searchMarks[searchIdx].classList.remove("cur");
-  searchIdx = (searchIdx + delta + searchMarks.length) % searchMarks.length;
-  const mk=searchMarks[searchIdx];
-  mk.classList.add("cur");
-  mk.scrollIntoView({block:"center", behavior:"smooth"});
-  $("#inCount").textContent = `${searchIdx+1} / ${searchMarks.length}`;
+function updateUserNav(){
+  const c=$("#uCount"); if(!c) return;
+  const n=userMsgs.length;
+  c.textContent = !n ? "없음"
+                : (userIdx>=0 && userIdx<n) ? `${userIdx+1} / ${n}` : `– / ${n}`;
+  const dim = n ? "" : "0.4";
+  const p=$("#uPrev"), x=$("#uNext");
+  if(p) p.style.opacity=dim; if(x) x.style.opacity=dim;
+}
+function gotoUser(delta){
+  if(!userMsgs.length) return;
+  let i = userIdx + delta;
+  if(i < 0) i = userMsgs.length-1;      // 처음에서 뒤로 → 마지막으로
+  if(i >= userMsgs.length) i = 0;       // 마지막에서 앞으로 → 처음으로
+  userIdx = i;
+  const el = userMsgs[i];
+  // 문서가 수십만 px 이라 smooth 는 오히려 답답하다. 즉시 이동.
+  el.scrollIntoView({block:"center"});
+  el.classList.add("flash");
+  setTimeout(()=>el.classList.remove("flash"), 1200);
+  updateUserNav();
 }
 
 // ---------- 세션 내 표시 필터 (체크 = 표시, 기본 전체 표시, localStorage 저장) ----------
@@ -1675,6 +1665,7 @@ function applyMsgFilter(){
   const body=$("#detailBody"); if(!body) return;
   const vis=getVisible();
   for(const t of MSG_TYPES) body.classList.toggle("hide-"+t.k, !vis.has(t.k));
+  collectUserMsgs();   // User 를 껐다 켜면 탐색 대상도 달라진다
 }
 function setupFilterPopover(){
   const btn=$("#filterBtn"), pop=$("#filterPop");

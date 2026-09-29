@@ -317,8 +317,8 @@ def _iter_visible_messages(path, meta=None):
     """타임라인에 실제로 표시되는 user/assistant 메시지 obj 만 yield.
 
     분기(/branch) 세션이면 부모와 uuid 를 공유하는 '상속' 메시지를 건너뛴다.
-    parse_session 의 트리밍 규칙과 동일하게 맞춰, 전체 검색 건수가 세션 내
-    검색(표시되는 메시지만 대상)과 어긋나지 않게 한다.
+    parse_session 의 트리밍 규칙과 같게 맞춰, 검색 결과가 화면에 보이지도 않는
+    메시지를 가리키지 않도록 한다.
     """
     if meta is None:
         meta = scan_meta(path)
@@ -339,11 +339,10 @@ def _iter_visible_messages(path, meta=None):
 
 
 def _searchable_texts(obj):
-    """한 메시지에서 세션 내 검색이 훑는 텍스트 조각들을 반환.
+    """한 메시지에서 전체 검색이 훑을 텍스트 조각들을 반환.
 
-    index.html 의 세션 내 검색은 렌더된 타임라인 본문(본문 텍스트 · thinking ·
-    도구 호출 이름/입력 JSON · 도구 결과)을 대상으로 한다. 전체 검색 건수를
-    맞추기 위해 같은 대상에서 텍스트를 뽑는다.
+    타임라인에 실제로 렌더되는 것과 같은 대상을 본다 — 본문 텍스트 · thinking ·
+    도구 호출 이름/입력 JSON · 도구 결과.
     """
     texts = []
     for b in _normalize_content((obj.get("message") or {}).get("content")):
@@ -364,7 +363,7 @@ def _searchable_texts(obj):
 def search_all(term):
     """전 세션 텍스트를 훑어 매칭 세션 + 스니펫 반환.
 
-    건수(hits)는 세션 내 검색과 동일하게 '출현 횟수'로 센다 (블록당 1회가 아님).
+    건수(hits)는 블록당 1회가 아니라 '출현 횟수'로 센다.
     """
     term_l = term.lower()
     results = []
