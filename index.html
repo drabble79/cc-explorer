@@ -977,9 +977,13 @@ function renderTree(autoOpenFirst){
     if(p && openPaths.has(p)){ const nd=r.closest(".node"); if(nd) nd.classList.add("open"); }
     if(p && selPath && p===selPath){ r.classList.add("sel"); restoredSel=true; }
   });
-  // 최초 로드에서 자동으로 펼칠 대상은 즐겨찾기가 아니라 첫 디렉토리다
+  // 최초 로드 시작 위치: 즐겨찾기가 하나라도 있으면 거기서, 없으면 첫 디렉토리에서.
+  // (휴지통 행도 .favrow 를 공유하므로 :not(.trashrow) 로 골라낸다)
   if(autoOpenFirst && !restoredSel){
-    const firstRow=treeBox.querySelector(".row:not(.favrow)"); if(firstRow) firstRow.click(); }
+    const target = (favSessions().length ? treeBox.querySelector(".favrow:not(.trashrow)") : null)
+                || treeBox.querySelector(".row:not(.favrow)");
+    if(target) target.click();
+  }
 }
 
 // ---------- 목록 ----------
