@@ -35,7 +35,8 @@
     --on-accent:#16121f;
     --tint:rgba(157,124,244,.12);
     --tint-2:rgba(157,124,244,.22);
-    --flash:rgba(157,124,244,.46);    /* User 탐색 강조 — 평소 말풍선과 확실히 갈리게 */
+    --user-bg:rgba(157,124,244,.46);   /* 사용자 발화 말풍선 — 훑을 때 기준점이라 진하게 */
+    --flash:rgba(212,164,94,.45);      /* User 탐색 강조 — 보라 위에서 갈리도록 호박색 */
 
     --info:#7d9cc4;             /* 도구 호출 */
     --info-tint:rgba(125,156,196,.12);
@@ -72,7 +73,8 @@
     --on-accent:#ffffff;
     --tint:rgba(109,75,196,.09);
     --tint-2:rgba(109,75,196,.17);
-    --flash:rgba(109,75,196,.32);
+    --user-bg:rgba(109,75,196,.30);
+    --flash:rgba(200,140,30,.32);
 
     --info:#4f7296;
     --info-tint:rgba(79,114,150,.10);
@@ -424,8 +426,8 @@
   .bubble { background:var(--surface); border:1px solid var(--line); border-radius:var(--r3);
             padding:var(--s3) var(--s4); }
   /* 사용자 발화는 대화를 훑을 때의 기준점이라 액센트를 몰아준다 —
-     틴트 배경 + 좌측 레일. assistant 는 기본 면으로 두어 대비를 만든다. */
-  .role-user .bubble { background:var(--tint); border-color:var(--tint-2);
+     진한 틴트 배경 + 좌측 레일. assistant 는 기본 면으로 두어 대비를 만든다. */
+  .role-user .bubble { background:var(--user-bg); border-color:var(--tint-2);
                        border-left:3px solid var(--accent); }
   .role-user .head b { color:var(--accent); font-weight:700; }
   .role-asst .head b { color:var(--fg-2); font-weight:700; }
@@ -471,12 +473,14 @@
           display:inline-block; margin-top:var(--s2); }
   .more:hover { color:var(--fg); }
   /* User 탐색으로 방금 이동한 메시지를 잠깐 강조.
-     테두리를 덧그리지 않고 배경 단계만 올린다 — User 말풍선은 이미 틴트 배경 +
-     좌측 레일을 쓰고 있어서, 링을 더하면 왼쪽에서 겹쳐 두꺼워 보인다.
+     말풍선 자체가 이미 진한 보라라서, 강조는 '더 진한 보라'가 아니라 아예 다른
+     색(호박)으로 갈아끼운다. 테두리를 덧그리지 않고 면과 테두리 '색'만 바꾼다 —
+     두께를 건드리면 레이아웃이 밀리고, 좌측 레일과 겹쳐 두꺼워 보인다.
      (참고: .msg 에 content-visibility:auto 가 걸려 paint containment 가 적용되므로
       자식에 outline 이나 '바깥' box-shadow 를 쓰면 좌·우·아래가 잘린다) */
   .role-user .bubble { transition:background .5s ease-out, border-color .5s ease-out; }
-  .msg.flash .bubble { background:var(--flash); border-color:var(--accent); transition:none; }
+  .msg.flash .bubble { background:var(--flash); border-color:var(--warn);
+                       border-left-color:var(--warn); transition:none; }
 
   /* ==================== 마크다운 렌더 (assistant 본문) ==================== */
   .blk.md { white-space:normal; }
