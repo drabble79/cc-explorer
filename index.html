@@ -15,6 +15,9 @@
     --r1:4px; --r2:6px; --r3:10px; --r4:14px; --pill:999px;
     --fs-xs:11px; --fs-sm:12px; --fs-md:13px; --fs-base:14px; --fs-lg:15px;
     --bar-h:50px;
+    /* 상세 본문 최대 폭 — 요약 카드·표시 필터·말풍선이 같은 선에서 멈춘다.
+       한쪽만 상한이 없으면 사이드바를 접었을 때 위아래가 어긋나 보인다. */
+    --content-w:1280px;
     --font:Pretendard,"Pretendard Variable",Inter,system-ui,-apple-system,"Segoe UI",
            Roboto,"Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
     --mono:ui-monospace,SFMono-Regular,"JetBrains Mono","SF Mono",Menlo,"D2Coding",Consolas,monospace;
@@ -131,16 +134,20 @@
   #globalSearch:hover { border-color:var(--line-2); }
 
   /* ==================== 버튼 공통 ==================== */
-  #settingsBtn, #dateBtn, #themeBtn, #filterBtn, .minibtn, .sess .extendbtn {
+  #settingsBtn, #dateBtn, #themeBtn, #sidebarBtn, #filterBtn, .minibtn, .sess .extendbtn {
     background:var(--surface-2); border:1px solid var(--line); color:var(--fg-2);
     border-radius:var(--r2); cursor:pointer; white-space:nowrap;
     transition:background .14s, border-color .14s, color .14s;
   }
-  #settingsBtn:hover, #dateBtn:hover, #themeBtn:hover, #filterBtn:hover,
+  #settingsBtn:hover, #dateBtn:hover, #themeBtn:hover, #sidebarBtn:hover, #filterBtn:hover,
   .minibtn:hover, .sess .extendbtn:hover {
     background:var(--surface-3); border-color:var(--line-2); color:var(--fg);
   }
   #settingsBtn, #dateBtn { padding:6px 12px; font-size:var(--fs-sm); }
+  #sidebarBtn { padding:5px 10px; font-size:var(--fs-base); line-height:1; }
+  /* 사이드바 접기 — 트리 패널과 그 스플리터만 감춘다 */
+  body.hide-tree #tree,
+  body.hide-tree .splitter[data-target="tree"] { display:none; }
   #dateBtn.active { color:var(--accent); background:var(--tint); border-color:var(--tint-2); }
   #themeBtn { padding:6px 10px; font-size:var(--fs-base); line-height:1; }
 
@@ -386,8 +393,11 @@
   .navbtn:hover { color:var(--accent); background:var(--surface-3); }
   #uCount { color:var(--muted); font-size:var(--fs-xs); min-width:52px; text-align:center;
             font-variant-numeric:tabular-nums; }
+  /* 좌우 padding 이 상한 안에 포함되도록(box-sizing:border-box) 패딩만큼 더 준다 —
+     그래야 '표시' 버튼 오른쪽 끝이 말풍선·요약 카드의 오른쪽 끝과 맞는다 */
   #filterFloat { position:sticky; top:var(--bar-h); z-index:7; display:flex;
-                 justify-content:flex-end; padding:var(--s2) var(--s5) 0; pointer-events:none; }
+                 justify-content:flex-end; padding:var(--s2) var(--s5) 0;
+                 max-width:calc(var(--content-w) + var(--s5) * 2); pointer-events:none; }
   .filterwrap { position:relative; pointer-events:auto; }
   #filterBtn { padding:4px 11px; font-size:var(--fs-sm); box-shadow:var(--sh-1); }
   .hide-user .role-user, .hide-asst .role-asst, .hide-tool .role-tool,
@@ -400,6 +410,7 @@
 
   /* ==================== 상세 — 요약 카드 ==================== */
   #sumCard { position:relative; margin:var(--s4) var(--s5) var(--s2);
+             max-width:var(--content-w);
              background:var(--surface); border:1px solid var(--line);
              border-radius:var(--r3); padding:var(--s4); font-size:var(--fs-sm); }
   .srow { display:flex; gap:var(--s3); padding:3px 0; align-items:baseline; }
@@ -423,7 +434,7 @@
      contain-intrinsic-size 의 auto 는 한 번 실제로 그린 높이를 기억해 스크롤바가 덜 튄다.
      측정(4,983 메시지): 초기 레이아웃 1899ms→130ms, 필터 토글 338ms→11ms. */
   #detailBody .msg { content-visibility:auto; contain-intrinsic-size:auto 180px; }
-  .msg { margin:0 0 var(--s5); max-width:960px; }
+  .msg { margin:0 0 var(--s5); max-width:var(--content-w); }
   .msg .head { font-size:var(--fs-xs); color:var(--muted); margin-bottom:var(--s2);
                display:flex; gap:var(--s2); align-items:center; }
   .bubble { background:var(--surface); border:1px solid var(--line); border-radius:var(--r3);
@@ -583,6 +594,7 @@
 </head>
 <body>
 <header>
+  <button id="sidebarBtn" title="사이드바 숨기기">«</button>
   <h1><span class="mark"></span><b>Claude Code 세션 뷰어</b></h1>
   <span class="root" id="rootPath"></span>
   <span class="grow"></span>
@@ -1898,7 +1910,28 @@ function setupTheme(){
   });
 }
 
+// ---------- 사이드바(좌측 트리) 접기 ----------
+// 접어도 목록·타임라인은 그대로 쓸 수 있다. 선택 상태는 트리 DOM 에 남아 있으므로
+// 다시 펼치면 원래대로 보인다.
+function applySidebar(hidden){
+  document.body.classList.toggle("hide-tree", hidden);
+  const b=$("#sidebarBtn"); if(!b) return;
+  b.textContent = hidden ? "»" : "«";
+  b.title = hidden ? "사이드바 보이기" : "사이드바 숨기기";
+}
+function setupSidebar(){
+  let hidden=false;
+  try{ hidden = localStorage.getItem("ccsv-hide-tree")==="1"; }catch(e){}
+  applySidebar(hidden);
+  $("#sidebarBtn").onclick=()=>{
+    const next = !document.body.classList.contains("hide-tree");
+    try{ localStorage.setItem("ccsv-hide-tree", next?"1":"0"); }catch(e){}
+    applySidebar(next);
+  };
+}
+
 setupTheme();
+setupSidebar();
 setupSplitters();
 setupDatePopover();
 init();
