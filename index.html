@@ -258,6 +258,9 @@
   .ndot { width:6px; height:6px; flex:0 0 6px; border-radius:2px;
           background:var(--muted); opacity:.5; }
   .row.sel .ndot { background:var(--accent); opacity:1; }
+  /* 트리 루트('전체') — 그 아래 디렉토리들과 한 단계 구분되게 */
+  .row.allrow .nlast { font-weight:700; }
+  .row.allrow .ndot { border-radius:50%; opacity:.8; }
   .nlabel { display:flex; align-items:baseline; min-width:0; overflow:hidden; }
   .npre { color:var(--muted); font-size:var(--fs-sm); flex:0 1 auto; min-width:0;
           overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -873,12 +876,19 @@ function buildTree(sessions){
 // 표시 카운트는 필터 통과분으로, 0건 노드는 숨긴다. 클릭 시엔 필터 전 전체 세션을 넘겨
 // showList 가 다시 필터링하므로 필터를 넓혀도 목록이 올바르게 복원된다.
 // 들여쓰기는 .children 의 가이드 라인(CSS)이 담당하므로 depth 는 쓰지 않는다.
-function renderNode(node, pred){
-  // compress single-child chains that have no own sessions
+// rootLabel 을 주면 그 노드를 트리의 루트('전체')로 그린다 — 경로 압축을 하지 않고
+// 이름을 고정한다. 루트가 없으면 /home, /data 가 각각 최상단이 되어 '전부'를 한 번에
+// 고를 수 없고, 기간 필터도 고른 가지에만 걸린다.
+function renderNode(node, pred, rootLabel){
   let label = node.name, cur = node;
-  while(Object.keys(cur.children).length===1 && cur.sessions.length===0){
-    const only = cur.children[Object.keys(cur.children)[0]];
-    label += "/"+only.name; cur = only;
+  if(rootLabel){
+    label = rootLabel;
+  } else {
+    // compress single-child chains that have no own sessions
+    while(Object.keys(cur.children).length===1 && cur.sessions.length===0){
+      const only = cur.children[Object.keys(cur.children)[0]];
+      label += "/"+only.name; cur = only;
+    }
   }
   const count = nodeFilteredCount(cur, pred);
   if(count===0) return null;   // 기간 필터로 0건이면 노드 숨김
@@ -886,9 +896,9 @@ function renderNode(node, pred){
     .map(k=>[k, nodeFilteredCount(k, pred)]).filter(([,c])=>c>0)
     .sort((a,b)=>b[1]-a[1]).map(([k])=>k);
   const el = document.createElement("div"); el.className="node";
-  const row = document.createElement("div"); row.className="row";
-  row.dataset.path = cur.path || "";
-  row.title = label || "/";        // 압축 경로 전체는 툴팁으로
+  const row = document.createElement("div"); row.className="row"+(rootLabel?" allrow":"");
+  row.dataset.path = rootLabel ? "__all__" : (cur.path || "");
+  row.title = rootLabel ? "모든 세션" : (label || "/");   // 압축 경로 전체는 툴팁으로
   const hasKids = kids.length>0;
   // 압축된 경로는 앞부분만 줄이고 마지막 세그먼트는 항상 보이게 나눠 렌더
   const cut = label.lastIndexOf("/");
@@ -971,15 +981,11 @@ function renderTree(autoOpenFirst){
   // 기간 필터와 무관하게 항상 맨 위에
   treeBox.appendChild(favRow());
   treeBox.appendChild(trashRow());
-  const kids=Object.values(TREE.children)
-    .map(k=>[k, nodeFilteredCount(k, pred)]).filter(([,c])=>c>0)
-    .sort((a,b)=>b[1]-a[1]).map(([k])=>k);
-  if(!kids.length){
-    treeBox.insertAdjacentHTML("beforeend",
-      '<div class="empty">'+(dateFilterActive()?"이 기간에 세션이 없습니다":"세션 없음")+'</div>');
-  } else {
-    for(const k of kids){ const el=renderNode(k, pred); if(el) treeBox.appendChild(el); }
-  }
+  // 디렉토리는 전부 '전체' 아래로 들어간다. 전체를 고르면 기간 필터가 모든 세션에 걸린다.
+  const rootEl = renderNode(TREE, pred, "전체");
+  if(rootEl) treeBox.appendChild(rootEl);
+  else treeBox.insertAdjacentHTML("beforeend",
+    '<div class="empty">'+(dateFilterActive()?"이 기간에 세션이 없습니다":"세션 없음")+'</div>');
   // 복원: 펼침 + 선택
   let restoredSel=false;
   treeBox.querySelectorAll(".row").forEach(r=>{
@@ -989,10 +995,16 @@ function renderTree(autoOpenFirst){
   });
   // 최초 로드 시작 위치: 즐겨찾기가 하나라도 있으면 거기서, 없으면 첫 디렉토리에서.
   // (휴지통 행도 .favrow 를 공유하므로 :not(.trashrow) 로 골라낸다)
-  if(autoOpenFirst && !restoredSel){
-    const target = (favSessions().length ? treeBox.querySelector(".favrow:not(.trashrow)") : null)
-                || treeBox.querySelector(".row:not(.favrow)");
-    if(target) target.click();
+  if(autoOpenFirst){
+    if(!restoredSel){
+      const target = (favSessions().length ? treeBox.querySelector(".favrow:not(.trashrow)") : null)
+                  || treeBox.querySelector(".row:not(.favrow)");
+      if(target) target.click();
+    }
+    // 첫 화면에서는 전체를 펼쳐 둔다. 위 자동 클릭이 전체 행이었다면 토글로 접히므로
+    // 클릭 뒤에 다시 펼친다(add 는 여러 번 불러도 안전).
+    const rootRow = treeBox.querySelector(".row.allrow");
+    if(rootRow){ const nd=rootRow.closest(".node"); if(nd) nd.classList.add("open"); }
   }
 }
 
