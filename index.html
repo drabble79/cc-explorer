@@ -52,6 +52,15 @@
     --danger:#e08a86;
     --danger-tint:rgba(224,138,134,.14);
 
+    /* 코드 블록은 라이트에서도 어두운 면을 쓴다.
+       밝은 배경에서 같은 체감을 내려면 색을 어둡게 해야 하는데, 그러면 토큰들의
+       밝기가 다 비슷해져 오히려 서로 구분이 안 된다(대비를 7:1 로 맞춰봤지만
+       그래서 더 묽어 보였다). 면을 어둡게 깔면 채도 높은 색을 그대로 쓸 수 있어
+       라이트·다크가 똑같이 선명해진다. */
+    --code-surface:#100e16; --code-fg:#e8e6f0;
+    --hl-comment:#7e7994; --hl-key:#c792ea; --hl-str:#9ece6a; --hl-num:#ff9e64;
+    --hl-fn:#7aa2f7; --hl-type:#e0af68; --hl-attr:#89ddff; --hl-del:#f7768e;
+
     --sh-1:0 1px 2px rgba(0,0,0,.28);
     --sh-2:0 6px 20px rgba(0,0,0,.4);
     --sh-3:0 18px 48px rgba(0,0,0,.5);
@@ -64,7 +73,7 @@
     --surface:#ffffff;
     --surface-2:#f3f1f8;
     --surface-3:#e9e6f2;
-    --code-bg:#f5f3fa;
+    --code-bg:#eae8f2;
     --line:#e4e1ed;
     --line-2:#d2cde0;
     --fg:#211f2b;
@@ -89,6 +98,10 @@
     --warn-tint:rgba(138,97,21,.12);
     --danger:#c0453f;
     --danger-tint:rgba(192,69,63,.10);
+
+    /* 코드 블록 면만 어둡게 — 토큰 색(--hl-*)은 :root 의 선명한 값을 그대로 쓴다.
+       순흑이 아니라 살짝 보라기 도는 짙은 색이라야 흰 바탕에 구멍처럼 보이지 않는다. */
+    --code-surface:#1d1a29;
 
     --sh-1:0 1px 2px rgba(40,30,70,.07);
     --sh-2:0 6px 18px rgba(40,30,70,.10);
@@ -457,7 +470,8 @@
   .role-meta > details[open] > summary { margin-bottom:var(--s2); }
   .blk { margin:0 0 var(--s3); } .blk:last-child { margin-bottom:0; }
   .blk.text { white-space:pre-wrap; word-break:break-word; }
-  pre { background:var(--code-bg); border:1px solid var(--line); border-radius:var(--r2);
+  pre { background:var(--code-surface); color:var(--code-fg);
+        border:1px solid var(--line); border-radius:var(--r2);
         padding:var(--s3); overflow:auto; margin:var(--s2) 0; line-height:1.55; }
   code { font-family:var(--mono); font-size:var(--fs-sm); }
   .blk.text code.inline { background:var(--code-bg); border:1px solid var(--line);
@@ -471,7 +485,9 @@
   .toolres { background:var(--code-bg); border:1px solid var(--line);
              border-radius:var(--r2); padding:var(--s2) var(--s3); }
   .toolres.err { background:var(--danger-tint); border-color:var(--danger); }
-  .toolres pre { background:transparent; border:none; padding:0; }
+  /* 도구 결과는 코드가 아니라 출력이라 밝은 면을 유지한다 —
+     pre 가 어두운 면을 쓰게 됐으므로 배경과 글자색을 되돌린다 */
+  .toolres pre { background:transparent; color:inherit; border:none; padding:0; }
   .toolres.clamped pre { max-height:260px; overflow:hidden; }
   .toolres.clamped.expanded pre { max-height:none; }
   details.think { background:var(--tint-p); border:1px solid var(--line);
@@ -531,10 +547,29 @@
                              text-align:left; vertical-align:top; }
   .mdtable th { color:var(--fg-2); font-weight:600; background:var(--surface-2); white-space:nowrap; }
   .mdtable tr:last-child td { border-bottom:none; }
+  /* highlight.js 토큰 — 전용 테마 CSS 대신 우리 토큰에 매핑해 라이트/다크를 함께 따른다 */
+  .hljs-comment, .hljs-quote { color:var(--hl-comment); font-style:italic; }
+  .hljs-keyword, .hljs-literal, .hljs-section, .hljs-selector-tag,
+  .hljs-name, .hljs-tag, .hljs-doctag { color:var(--hl-key); }
+  .hljs-string, .hljs-regexp, .hljs-addition, .hljs-attribute,
+  .hljs-meta .hljs-string, .hljs-symbol, .hljs-bullet { color:var(--hl-str); }
+  .hljs-number, .hljs-link { color:var(--hl-num); }
+  .hljs-title, .hljs-title.function_, .hljs-function .hljs-title,
+  .hljs-selector-id, .hljs-selector-class { color:var(--hl-fn); }
+  .hljs-type, .hljs-built_in, .hljs-class .hljs-title, .hljs-params,
+  .hljs-title.class_ { color:var(--hl-type); }
+  .hljs-attr, .hljs-variable, .hljs-template-variable,
+  .hljs-selector-attr, .hljs-property { color:var(--hl-attr); }
+  .hljs-meta, .hljs-comment .hljs-doctag { color:var(--hl-comment); }
+  .hljs-deletion { color:var(--hl-del); }
+  .hljs-emphasis { font-style:italic; }
+  .hljs-strong { font-weight:700; }
   .blk.md pre { position:relative; }
+  /* 언어 라벨은 어두운 코드 면 위에 얹히므로 테마 토큰 대신 면 기준 색을 쓴다 */
   .blk.md pre[data-lang]::before { content:attr(data-lang); position:absolute; top:0; right:0;
-    font:600 var(--fs-xs)/1 var(--mono); color:var(--muted); background:var(--surface-2);
-    padding:4px 8px; border-radius:0 var(--r2) 0 var(--r2); }
+    font:600 var(--fs-xs)/1 var(--mono); color:var(--hl-comment);
+    background:rgba(255,255,255,.07);
+    padding:4px 8px; border-radius:0 calc(var(--r2) - 1px) 0 var(--r2); }
 
   /* ==================== 삭제 확인 모달 ==================== */
   .dm-ov { position:fixed; inset:0; background:rgba(12,10,20,.5); z-index:60; display:flex;
@@ -631,6 +666,9 @@
   <div id="settingsBody"></div>
 </aside>
 <div id="toast"></div>
+<!-- 코드블록 색칠. 레포에 번들로 들어 있어 외부 네트워크 요청은 없다.
+     못 불러와도 코드는 색만 빠진 채 정상 표시된다(highlightCode 의 폴백). -->
+<script src="/vendor/highlight.bundle.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 let SESSIONS = [];          // 전체 메타
@@ -1448,12 +1486,26 @@ function mdBlocks(lines){
   return out.join("");
 }
 
+// \uD0DC\uADF8 \uC5C6\uB294 \uCF54\uB4DC\uBE14\uB85D\uC774 60% \uB098 \uB41C\uB2E4. \uC9E7\uC740 \uC870\uAC01\uAE4C\uC9C0 \uC790\uB3D9 \uAC10\uC9C0\uC5D0 \uB9E1\uAE30\uBA74 \uC5C9\uB6B1\uD55C \uC5B8\uC5B4\uB85C
+// \uC7A1\uD600 \uC0C9\uC774 \uB354 \uC5B4\uC9C0\uB7EC\uC6CC\uC9C0\uBBC0\uB85C, \uC5B4\uB290 \uC815\uB3C4 \uAE38\uC774\uAC00 \uB418\uB294 \uAC83\uB9CC \uD754\uD55C \uC5B8\uC5B4\uB85C \uC881\uD600 \uCD94\uC815\uD55C\uB2E4.
+const HL_AUTO = ["bash","python","javascript","json","c","cpp","ini","diff","yaml","xml"];
+function highlightCode(code, lang){
+  if(typeof hljs === "undefined") return esc(code);   // \uBC88\uB4E4\uC744 \uBABB \uBD88\uB7EC\uC628 \uACBD\uC6B0
+  try{
+    // getLanguage \uB294 js/sh/ts/html \uAC19\uC740 \uBCC4\uCE6D\uB3C4 \uBC1B\uC544\uC900\uB2E4
+    if(lang && hljs.getLanguage(lang))
+      return hljs.highlight(code, {language:lang, ignoreIllegals:true}).value;
+    if(!lang && code.length>=60 && code.indexOf("\n")>=0)
+      return hljs.highlightAuto(code, HL_AUTO).value;
+  }catch(e){ /* \uC0C9\uCE60 \uC2E4\uD328\uB294 \uC870\uC6A9\uD788 \uC6D0\uBB38\uC73C\uB85C */ }
+  return esc(code);
+}
 function renderMarkdown(text){
   const codes = [];
   const src = String(text).replace(/```([^\n`]*)\n?([\s\S]*?)```/g, (m, lang, body)=>{
     const l = lang.trim();
     codes.push(`<pre${l ? ` data-lang="${escQ(esc(l))}"` : ""}>`+
-               `<code>${esc(body.replace(/\n+$/,""))}</code></pre>`);
+               `<code class="hljs">${highlightCode(body.replace(/\n+$/,""), l)}</code></pre>`);
     return `\uE000C${codes.length-1}\uE000`;
   });
   return mdBlocks(esc(src).split("\n"))

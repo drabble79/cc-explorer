@@ -405,6 +405,21 @@ def _safe_session_path(raw):
     return p
 
 
+VENDOR_ROOT = (HERE / "vendor").resolve()
+
+
+def _safe_vendor_path(name):
+    """/vendor/<name> 을 레포의 vendor/ 안으로 제한. 하위 디렉토리는 두지 않는다."""
+    if not name or "/" in name or "\\" in name or name.startswith("."):
+        return None
+    p = (VENDOR_ROOT / name).resolve()
+    try:
+        p.relative_to(VENDOR_ROOT)
+    except ValueError:
+        return None
+    return p if p.is_file() else None
+
+
 def _safe_readable_path(raw):
     """읽기 전용 경로. 휴지통 항목도 복원 전에 내용을 확인할 수 있어야 한다."""
     p = _safe_session_path(raw)
@@ -786,6 +801,13 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if u.path == "/":
                 return self._send_file(HERE / "index.html", "text/html; charset=utf-8")
+            if u.path.startswith("/vendor/"):
+                p = _safe_vendor_path(u.path[len("/vendor/"):])
+                if not p:
+                    return self.send_error(404)
+                ctype = ("application/javascript; charset=utf-8" if p.suffix == ".js"
+                         else "text/plain; charset=utf-8")
+                return self._send_file(p, ctype)
             if u.path == "/api/projects":
                 return self._send_json({
                     "root": str(SESSIONS_ROOT),
