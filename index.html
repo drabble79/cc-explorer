@@ -1489,8 +1489,10 @@ function mdBlocks(lines){
 // \uD0DC\uADF8 \uC5C6\uB294 \uCF54\uB4DC\uBE14\uB85D\uC774 60% \uB098 \uB41C\uB2E4. \uC9E7\uC740 \uC870\uAC01\uAE4C\uC9C0 \uC790\uB3D9 \uAC10\uC9C0\uC5D0 \uB9E1\uAE30\uBA74 \uC5C9\uB6B1\uD55C \uC5B8\uC5B4\uB85C
 // \uC7A1\uD600 \uC0C9\uC774 \uB354 \uC5B4\uC9C0\uB7EC\uC6CC\uC9C0\uBBC0\uB85C, \uC5B4\uB290 \uC815\uB3C4 \uAE38\uC774\uAC00 \uB418\uB294 \uAC83\uB9CC \uD754\uD55C \uC5B8\uC5B4\uB85C \uC881\uD600 \uCD94\uC815\uD55C\uB2E4.
 const HL_AUTO = ["bash","python","javascript","json","c","cpp","ini","diff","yaml","xml"];
+const HL_MAX = 40000;   // \uC720\uB09C\uD788 \uD070 \uBE14\uB85D\uC740 \uC0C9\uCE60\uC744 \uAC74\uB108\uB6F4\uB2E4(\uBCD1\uB9AC\uC801 \uC785\uB825 \uBC29\uC5B4)
 function highlightCode(code, lang){
   if(typeof hljs === "undefined") return esc(code);   // \uBC88\uB4E4\uC744 \uBABB \uBD88\uB7EC\uC628 \uACBD\uC6B0
+  if(code.length > HL_MAX) return esc(code);
   try{
     // getLanguage \uB294 js/sh/ts/html \uAC19\uC740 \uBCC4\uCE6D\uB3C4 \uBC1B\uC544\uC900\uB2E4
     if(lang && hljs.getLanguage(lang))
@@ -1518,7 +1520,8 @@ function blockHTML(b, md){
     : `<div class="blk text">${renderText(b.text)}</div>`;
   if(b.kind==="thinking") return `<details class="think blk"><summary>💭 thinking</summary><div class="blk text">${esc(b.text)}</div></details>`;
   if(b.kind==="tool_use"){ let inp=""; try{inp=JSON.stringify(b.input,null,2);}catch{inp=String(b.input);}
-    return `<div class="tool blk"><span class="tname">⚙ ${esc(b.name)}</span><pre><code>${esc(inp)}</code></pre></div>`; }
+    return `<div class="tool blk"><span class="tname">⚙ ${esc(b.name)}</span>`+
+      `<pre><code class="hljs">${highlightCode(inp, "json")}</code></pre></div>`; }
   if(b.kind==="tool_result"){ const long=b.text.length>800;
     return `<div class="toolres blk ${b.is_error?'err':''} ${long?'clamped':''}"><pre><code>${esc(b.text)}</code></pre>`+
       (long?`<span class="more">… 더 보기 (${b.text.length}자)</span>`:"")+`</div>`; }
