@@ -1143,14 +1143,18 @@ function renderForest(container, list, byIdAll){
 function showList(sessions, title, isFavView){
   curListRaw = sessions; curListTitle = title||"";
   curListIsFav = !!isFavView; curListIsTrash = false;
-  curList = applyDateFilter(sessions).slice().sort((a,b)=>(b.lastTs||"").localeCompare(a.lastTs||""));
+  // 즐겨찾기는 기간 필터를 받지 않는다 — 일부러 별을 단 세션을 '오래됐다'는 이유로
+  // 감추면 별을 단 뜻이 사라지고, 트리의 개수(필터 전)와도 어긋난다.
+  // (휴지통도 같은 이유로 필터를 받지 않는다)
+  curList = (curListIsFav ? sessions.slice() : applyDateFilter(sessions))
+    .slice().sort((a,b)=>(b.lastTs||"").localeCompare(a.lastTs||""));
   const box = $("#list");
   box.innerHTML = "";
   if(!curList.length){
-    box.innerHTML = dateFilterActive()
-      ? '<div class="empty">이 기간에 세션이 없습니다</div>'
-      : curListIsFav
-        ? '<div class="empty">즐겨찾기한 세션이 없습니다<br><br>세션 카드의 ☆ 를 눌러 추가하세요</div>'
+    box.innerHTML = curListIsFav
+      ? '<div class="empty">즐겨찾기한 세션이 없습니다<br><br>세션 카드의 ☆ 를 눌러 추가하세요</div>'
+      : dateFilterActive()
+        ? '<div class="empty">이 기간에 세션이 없습니다</div>'
         : '<div class="empty">세션이 없습니다</div>';
     return;
   }
