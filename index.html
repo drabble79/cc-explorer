@@ -128,6 +128,17 @@
                               border:3px solid transparent; background-clip:content-box; }
   ::-webkit-scrollbar-thumb:hover { background:var(--muted); background-clip:content-box; }
 
+  /* 서버/화면 버전 불일치 배너 */
+  #verBanner { flex:0 0 auto; display:flex; align-items:center; gap:var(--s2);
+               padding:9px var(--s4); font-size:var(--fs-sm); line-height:1.5;
+               color:var(--on-accent); background:var(--danger); }
+  #verBanner[hidden] { display:none; }
+  #verBanner b { font-weight:700; }
+  #verBanner code { background:rgba(0,0,0,.22); border-radius:var(--r1); padding:1px 6px; }
+  #verDetail { opacity:.8; font-size:var(--fs-xs); }
+  #verClose { margin-left:auto; cursor:pointer; opacity:.85; padding:0 var(--s1); }
+  #verClose:hover { opacity:1; }
+
   /* ==================== 헤더 ==================== */
   header { height:var(--bar-h); padding:0 var(--s4); display:flex; align-items:center;
            gap:var(--s3); flex:0 0 auto; position:relative; z-index:20;
@@ -628,6 +639,12 @@
 </script>
 </head>
 <body>
+<div id="verBanner" hidden>
+  <b>서버가 구버전입니다.</b> 화면은 최신인데 서버는 예전 프로세스가 떠 있는 상태라
+  일부 기능이 조용히 동작하지 않습니다. 터미널에서 <code>Ctrl+C</code> 후 다시 실행하세요.
+  <span id="verDetail"></span>
+  <span id="verClose" title="닫기">✕</span>
+</div>
 <header>
   <button id="sidebarBtn" title="사이드바 숨기기">«</button>
   <h1><span class="mark"></span><b>Claude Code 세션 뷰어</b></h1>
@@ -829,6 +846,11 @@ function setupDatePopover(){
   });
 }
 
+// 세션 표시 이름. /rename 으로 직접 붙인 이름이 있으면 그게 우선,
+// 없으면 Claude 가 자동으로 붙인 제목, 그것도 없으면 마지막 프롬프트·uuid.
+function sessTitle(s){
+  return (s && (s.customTitle || s.aiTitle || s.lastPrompt || s.uuid)) || "";
+}
 function fmtTime(ts){ if(!ts) return ""; const d=new Date(ts); if(isNaN(d)) return "";
   return d.toLocaleString("ko-KR",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}); }
 function fmtSize(n){ return n>1e6?(n/1e6).toFixed(1)+"M":Math.round(n/1e3)+"K"; }
@@ -1062,7 +1084,7 @@ function renderTree(autoOpenFirst){
 function sessEl(s, depth=0, forkMark=null){
   const d=document.createElement("div"); d.className="sess"; d.dataset.file=s.file;
   if(depth>0){ d.classList.add("forked"); d.style.paddingLeft=(12+depth*16)+"px"; }
-  const ttl = s.aiTitle || s.lastPrompt || s.uuid;
+  const ttl = sessTitle(s);
   const models = (s.models||[]).map(shortModel).join(", ");
   const fork = forkMark ? `<span class="forktag" title="${esc(forkMark)}">⑂ 분기</span> ` : "";
   const chk = selectMode ? `<input type="checkbox" class="selchk" ${selected.has(s.file)?"checked":""}>` : "";
@@ -1072,7 +1094,7 @@ function sessEl(s, depth=0, forkMark=null){
       `<button class="trashbtn" title="휴지통으로 보내기">🗑</button>`+
     `</div>`+
     `<div class="t">${chk}${fork}${esc(ttl)}</div>`+
-    (s.lastPrompt && s.aiTitle?`<div class="sub">${esc(s.lastPrompt)}</div>`:"")+
+    (s.lastPrompt && (s.customTitle||s.aiTitle)?`<div class="sub">${esc(s.lastPrompt)}</div>`:"")+
     `<div class="meta"><span>${fmtTime(s.lastTs)}</span>`+
     `<span class="badge">${s.msgCount}msg</span>`+
     (models?`<span class="badge">${esc(models)}</span>`:"")+
@@ -1108,7 +1130,7 @@ function renderForest(container, list, byIdAll){
     let mark = null;
     if(s.parentSessionId && !inGroup.has(s.parentSessionId)){
       const pm = byIdAll.get(s.parentSessionId);
-      mark = "분기 원본: " + (pm ? (pm.aiTitle || pm.uuid.slice(0,8)) : s.parentSessionId.slice(0,8));
+      mark = "분기 원본: " + (pm ? (pm.customTitle || pm.aiTitle || pm.uuid.slice(0,8)) : s.parentSessionId.slice(0,8));
     } else if(depth>0){
       mark = "부모 세션에서 /branch 로 분기됨";
     }
@@ -1241,7 +1263,7 @@ function confirmDelete(files){
   const items=files.map(f=>SESSIONS.find(s=>s.file===f)).filter(Boolean);
   const rows=items.map(s=>{
     const n=daysLeft(s);
-    const ttl=s.aiTitle||s.lastPrompt||s.uuid;
+    const ttl=sessTitle(s);
     return `<tr><td class="dm-t" title="${esc(ttl)}">${esc(ttl)}</td>`+
       `<td class="dm-d">${fmtTime(s.lastTs)}</td>`+
       `<td class="dm-x">${n===null?"":(n<=0?"삭제 임박":"D-"+n)}</td></tr>`;
@@ -1282,11 +1304,11 @@ async function loadTrash(){
 }
 function trashEl(it){
   const d=document.createElement("div"); d.className="sess trashcard"; d.dataset.file=it.file;
-  const ttl = it.aiTitle || it.lastPrompt || it.uuid;
+  const ttl = sessTitle(it);
   const models = (it.models||[]).map(shortModel).join(", ");
   const when = it.deletedAt ? fmtTime(new Date(it.deletedAt*1000).toISOString()) : "";
   d.innerHTML = `<div class="t">${esc(ttl)}</div>`+
-    (it.lastPrompt && it.aiTitle?`<div class="sub">${esc(it.lastPrompt)}</div>`:"")+
+    (it.lastPrompt && (it.customTitle||it.aiTitle)?`<div class="sub">${esc(it.lastPrompt)}</div>`:"")+
     `<div class="meta"><span>${fmtTime(it.lastTs)}</span>`+
     `<span class="badge">${it.msgCount||0}msg</span>`+
     (models?`<span class="badge">${esc(models)}</span>`:"")+
@@ -1341,7 +1363,7 @@ function confirmPurge(items, isAll){
   items=(items||[]).filter(Boolean);
   if(!items.length) return;
   const rows=items.map(it=>{
-    const ttl=it.aiTitle||it.lastPrompt||it.uuid;
+    const ttl=sessTitle(it);
     return `<tr><td class="dm-t" title="${esc(ttl)}">${esc(ttl)}</td>`+
       `<td class="dm-d">${fmtTime(it.lastTs)}</td></tr>`;
   }).join("");
@@ -1644,7 +1666,7 @@ async function openSession(file){
   // 목록을 다시 그리면 스크롤이 튀므로 객체만 갱신하고 렌더는 건드리지 않는다.
   const known = SESSIONS.find(s=>s.file===file);
   if(known) Object.assign(known, m);
-  const ttl=m.aiTitle||m.lastPrompt||m.uuid;
+  const ttl=sessTitle(m);
   D.innerHTML =
     `<div id="detailBar"><span class="ttl">${esc(ttl)}</span>`+
     `<span class="usernav" title="사용자 발화만 건너뛰며 보기">`+
@@ -1783,8 +1805,20 @@ async function globalSearch(q){
 }
 
 // ---------- init ----------
+// server.py 의 APP_VERSION 과 같아야 한다. 계약(엔드포인트·응답 필드)이 바뀌면 둘 다 올린다.
+const APP_VERSION = "4";
+// index.html 은 매 요청마다 디스크에서 새로 읽히지만 서버는 떠 있던 프로세스가 그대로다.
+// 코드를 고친 뒤 재시작을 잊으면 새 화면이 옛 서버에 말을 걸어 조용히 실패한다.
+function checkServerVersion(got){
+  if(got === APP_VERSION) return;
+  const d=$("#verDetail");
+  if(d) d.textContent = got ? `(서버 ${got} · 화면 ${APP_VERSION})`
+                            : `(서버가 버전을 알려주지 않음 · 화면 ${APP_VERSION})`;
+  const b=$("#verBanner"); if(b) b.hidden=false;
+}
 async function init(){
-  const data=await (await fetch("/api/projects")).json();
+  const data=await (await fetch("/api/projects", {cache:"no-store"})).json();
+  checkServerVersion(data.version);
   $("#rootPath").textContent=data.root;
   if(!data.exists){ $("#tree").innerHTML='<div class="empty">세션 폴더 없음</div>'; return; }
   SESSIONS=data.sessions||[];
@@ -1984,6 +2018,8 @@ function setupSidebar(){
     applySidebar(next);
   };
 }
+
+$("#verClose").onclick=()=>{ $("#verBanner").hidden=true; };
 
 setupTheme();
 setupSidebar();

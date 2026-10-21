@@ -16,6 +16,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
+# 화면(index.html)과 서버가 맞물리는 계약의 버전.
+# 엔드포인트·응답 필드가 바뀌면 올린다. index.html 의 APP_VERSION 과 같아야 하며,
+# 다르면 화면이 "서버를 재시작하세요" 배너를 띄운다.
+# (index.html 은 매 요청마다 디스크에서 새로 읽히는데 서버는 떠 있던 프로세스가
+#  그대로라, 코드를 고친 뒤 재시작을 잊으면 조용히 어긋난 상태가 된다.)
+APP_VERSION = "4"
+
 HERE = Path(__file__).resolve().parent
 SESSIONS_ROOT = (Path.home() / ".claude" / "projects").resolve()
 SETTINGS_FILE = (Path.home() / ".claude" / "settings.json").resolve()
@@ -60,7 +67,8 @@ def scan_meta(path):
     meta = {
         "file": str(path),
         "uuid": path.stem,
-        "aiTitle": None,
+        "aiTitle": None,       # Claude 가 자동으로 붙인 제목
+        "customTitle": None,   # /rename 으로 직접 붙인 이름 (있으면 이쪽이 우선)
         "lastPrompt": None,
         "cwd": None,
         "gitBranch": None,
@@ -88,6 +96,11 @@ def scan_meta(path):
         t = obj.get("type")
         if t == "ai-title":
             meta["aiTitle"] = obj.get("aiTitle") or meta["aiTitle"]
+            continue
+        if t == "custom-title":
+            # /rename 은 ai-title 을 바꾸지 않고 custom-title 레코드를 덧붙인다.
+            # 여러 번 바꿨으면 마지막 것이 현재 이름이다.
+            meta["customTitle"] = obj.get("customTitle") or meta["customTitle"]
             continue
         if t == "last-prompt":
             meta["lastPrompt"] = obj.get("lastPrompt") or meta["lastPrompt"]
@@ -304,7 +317,8 @@ def parse_session(path):
     if meta.get("parentSessionId"):
         fork = {
             "parentSessionId": meta["parentSessionId"],
-            "parentTitle": (parent_meta or {}).get("aiTitle") if parent_meta else None,
+            "parentTitle": ((parent_meta or {}).get("customTitle")
+                            or (parent_meta or {}).get("aiTitle")) if parent_meta else None,
             "parentFile": str(_find_session_file(meta["parentSessionId"]) or ""),
             "inheritedCount": inherited,
             "found": bool(parent_uuids),
@@ -522,6 +536,7 @@ def trash_sessions(files):
             "name": p.name,
             "deletedAt": time.time(),
             "aiTitle": meta.get("aiTitle"),
+            "customTitle": meta.get("customTitle"),
             "lastPrompt": meta.get("lastPrompt"),
             "lastTs": meta.get("lastTs"),
             "msgCount": meta.get("msgCount") or 0,
@@ -810,6 +825,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_file(p, ctype)
             if u.path == "/api/projects":
                 return self._send_json({
+                    "version": APP_VERSION,
                     "root": str(SESSIONS_ROOT),
                     "exists": SESSIONS_ROOT.exists(),
                     "sessions": list_sessions(),
